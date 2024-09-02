@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CygLiDAR D1 Visualization</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+        }
+
+        #controls {
+            z-index: 100;
+        }
+
+        #log {
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+        }
+
+        #canvas-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2px;
+            width: 100vw;
+            height: 90vh;
+        }
+
+        canvas {
+            background: #111;
+        }
+
+        #canvas2d,
+        #canvas3d {
+            position: relative;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-900 text-white">
+    <div id="controls" class="absolute top-4 left-4 p-4 bg-gray-800 rounded shadow-lg">
+        <div class="flex space-x-4">
+            <select id="modeSelect" class="bg-gray-700 text-white rounded px-4 py-2">
+                <option value="3D">3D Mode</option>
+                <option value="2D">2D Mode</option>
+            </select>
+            <button id="startButton"
+                class="bg-green-600 hover:bg-green-500 text-white rounded px-4 py-2">Start Scan</button>
+            <button id="stopButton" class="bg-red-600 hover:bg-red-500 text-white rounded px-4 py-2">Stop Scan</button>
+        </div>
+    </div>
+
+    <div id="log" class="absolute bottom-4 left-4 p-4 bg-gray-800 rounded shadow-lg w-80"></div>
+
+    <div id="canvas-container">
+        <canvas id="canvas2d" class="border border-gray-700"></canvas>
+        <canvas id="canvas3d" class="border border-gray-700"></canvas>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        let scene3D, scene2D, camera3D, camera2D, renderer3D, renderer2D, pointCloud3D, pointCloud2D;
+        const maxPoints3D = 9600; // 160 x 60 for 3D mode
+        const maxPoints2D = 1000; // Adjust for 2D mode
+        let socket;
+
+        function log(message) {
+            const logElement = document.getElementById('log');
+            logElement.innerHTML += message + '<br>';
+            logElement.scrollTop = logElement.scrollHeight;
+            console.log(message);
+        }
+
+        function init() {
+            log('Initializing visualization');
+
+            // Initialize 3D scene
+            scene3D = new THREE.Scene();
+            camera3D = new THREE.PerspectiveCamera(75, window.innerWidth / (window.innerHeight / 2), 0.1, 1000);
+            renderer3D = new THREE.WebGLRenderer({ canvas: document.getElementById('canvas3d') });
+            renderer3D.setSize(window.innerWidth / 2, window.innerHeight);
+            camera3D.position.z = 5;
+
+            const geometry3D = new THREE.BufferGeometry();
+            const positions3D = new Float32Array(maxPoints3D * 3);
+            const colors3D = new Float32Array(maxPoints3D * 3);
+            geometry3D.setAttribute('position', new THREE.BufferAttribute(positions3D, 3));
+            geometry3D.setAttribute('color', new THREE.BufferAttribute(colors3D, 3));
+
+            const material3D = new THREE.PointsMaterial({ size: 0.05, vertexColors: true });
+            pointCloud3D = new THREE.Points(geometry3D, material3D);
+            scene3D.add(pointCloud3D);
+
+            // Initialize 2D scene
+            scene2D = new THREE.Scene();
+            camera2D = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 1000);
+            renderer2D = new THREE.WebGLRenderer({ canvas: document.getElementById('canvas2d') });
+            renderer2D.setSize(window.innerWidth / 2, window.innerHeight);
+            camera2D.position.z = 1;
+
+            const geometry2D = new THREE.BufferGeometry();
+            const positions2D = new Float32Array(maxPoints2D * 3);
+            const colors2D = new Float32Array(maxPoints2D * 3);
+            geometry2D.setAttribute('position', new THREE.BufferAttribute(positions2D, 3));
+            geometry2D.setAttribute('color', new THREE.BufferAttribute(colors2D, 3));
+
+            const material2D = new THREE.PointsMaterial({ size: 0.05, vertexColors: true });
+            pointCloud2D = new THREE.Points(geometry2D, material2D);
+            scene2D.add(pointCloud2D);
+
+            // Add grid helpers
+            const gridHelper3D = new THREE.GridHelper(10, 10);
+            scene3D.add(gridHelper3D);
+            const gridHelper2D = new THREE.GridHelper(20, 20);
+            scene2D.add(gridHelper2D);
+
+            animate();
+            setupWebSocket();
+            setupControls();
+            log('Visualization initialized');
+        }
+
+        function updatePointCloud3D(points) {
+            log(`Updating 3D point cloud with ${points.length} points`);
+            const positions = pointCloud3D.geometry.attributes.position.array;
+            const colors = pointCloud3D.geometry.attributes.color.array;
+
+            for (let i = 0; i < points.length; i++) {
+                const i3 = i * 3;
+                positions[i3] = points[i].x;
+                positions[i3 + 1] = points[i].y;
+                positions[i3 + 2] = points[i].z;
+
+                // Color based on intensity
+                const intensity = points[i].intensity / 255;
+                colors[i3] = intensity;
+                colors[i3 + 1] = intensity;
+                colors[i3 + 2] = intensity;
+            }
+
+            pointCloud3D.geometry.attributes.position.needsUpdate = true;
+            pointCloud3D.geometry.attributes.color.needsUpdate = true;
+            pointCloud3D.geometry.setDrawRange(0, points.length);
+            log('3D Point cloud updated');
+        }
+
+        function updatePointCloud2D(points) {
+            log(`Updating 2D point cloud with ${points.length} points`);
+            const positions = pointCloud2D.geometry.attributes.position.array;
+            const colors = pointCloud2D.geometry.attributes.color.array;
+
+            for (let i = 0; i < points.length; i++) {
+                const i3 = i * 3;
+                positions[i3] = points[i].x;
+                positions[i3 + 1] = points[i].y;
+                positions[i3 + 2] = points[i].z;
+
+                // Color based on intensity
+                const intensity = points[i].intensity / 255;
+                colors[i3] = intensity;
+                colors[i3 + 1] = intensity;
+                colors[i3 + 2] = intensity;
+            }
+
+            pointCloud2D.geometry.attributes.position.needsUpdate = true;
+            pointCloud2D.geometry.attributes.color.needsUpdate = true;
+            pointCloud2D.geometry.setDrawRange(0, points.length);
+            log('2D Point cloud updated');
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer3D.render(scene3D, camera3D);
+            renderer2D.render(scene2D, camera2D);
+        }
+
+        function setupWebSocket() {
+            log('Setting up WebSocket connection');
+            socket = new WebSocket('ws://' + window.location.host);
+            socket.onopen = function (event) {
+                log('WebSocket connection established');
+            };
+            socket.onmessage = function (event) {
+                log('Received message from server');
+                const data = JSON.parse(event.data);
+                if (data.type === 'points') {
+                    log(`Received ${data.points.length} points`);
+                    if (data.mode === '3D') {
+                        updatePointCloud3D(data.points);
+                    } else if (data.mode === '2D') {
+                        updatePointCloud2D(data.points);
+                    }
+                } else if (data.type === 'status') {
+                    log('Status: ' + data.message);
+                }
+            };
+            socket.onerror = function (error) {
+                log('WebSocket error: ' + error);
+            };
+            socket.onclose = function (event) {
+                log('WebSocket connection closed');
+            };
+        }
+
+        function setupControls() {
+            const modeSelect = document.getElementById('modeSelect');
+            const startButton = document.getElementById('startButton');
+            const stopButton = document.getElementById('stopButton');
+
+            startButton.addEventListener('click', () => {
+                const mode = modeSelect.value;
+                log(`Starting ${mode} scan`);
+                socket.send(JSON.stringify({ command: 'start', mode }));
+            });
+
+            stopButton.addEventListener('click', () => {
+                log('Stopping scan');
+                socket.send(JSON.stringify({ command: 'stop' }));
+            });
+        }
+
+        init();
+    </script>
+</body>
+
+</html>
