@@ -2,14 +2,14 @@ import express from 'express';
 import http from 'http';
 import WebSocket from 'ws';
 import path from 'path';
-import { LidarScanner, LidarPoint, ScanMode } from './lidar-scanner';
+import { LidarScanner, LidarPoint, ScanMode } from './lidar';
 
 export class Server {
   private app: express.Application;
   private server: http.Server;
   private wss: WebSocket.Server;
   private scanner: LidarScanner;
-  private currentMode: ScanMode = '3D';
+  private currentMode: ScanMode = '2D';
 
   constructor(portPath: string) {
     this.app = express();
@@ -36,7 +36,7 @@ export class Server {
         console.log('Received message from client:', message);
         const data = JSON.parse(message);
         if (data.command === 'start') {
-          this.startScanning(ws, data.mode || '3D');
+          this.startScanning(ws, data.mode as ScanMode);
         } else if (data.command === 'stop') {
           this.stopScanning(ws);
         }
@@ -51,17 +51,18 @@ export class Server {
 
   private startScanning(ws: WebSocket, mode: ScanMode): void {
     console.log(`Starting ${mode} scan`);
-    if (this.currentMode !== mode) {
-      this.currentMode = mode;
-      this.scanner.initialize(mode);
-      this.scanner.onData((points: LidarPoint[]) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          console.log(`Sending ${points.length} points to client`);
-          ws.send(JSON.stringify({ type: 'points', points }));
-        }
-      });
-      ws.send(JSON.stringify({ type: 'status', message: `${mode} scanning started` }));
-    }
+    this.currentMode = mode;
+    this.scanner.initialize(mode);
+    this.scanner.onData((points: LidarPoint[]) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        // console.log(`Sending ${points.length} points to client`);
+        ws.send(JSON.stringify({ 
+          type: 'points', 
+          points: points.map( (p:any) => ({ x: p.x, y: p.y, z: p.z }))
+        }));
+      }
+    });
+    ws.send(JSON.stringify({ type: 'status', message: `${mode} scanning started` }));
   }
 
   private stopScanning(ws: WebSocket | null): void {
