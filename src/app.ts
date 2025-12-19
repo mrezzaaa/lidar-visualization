@@ -1,9 +1,7 @@
 import { Server } from './server';
 
 const PORT = 3000;
-const SERIAL_PORT = '/dev/cu.usbserial-1140'; // Adjust this to match your system
-
-const server = new Server(SERIAL_PORT);
+const server = new Server();
 
 server.start(PORT);
 

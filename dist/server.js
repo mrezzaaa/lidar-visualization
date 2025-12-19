@@ -8,14 +8,14 @@ const express_1 = __importDefault(require("express"));
 const http_1 = __importDefault(require("http"));
 const ws_1 = __importDefault(require("ws"));
 const path_1 = __importDefault(require("path"));
-const lidar_scanner_1 = require("./lidar-scanner");
+const lidar_1 = require("./lidar");
 class Server {
-    constructor(portPath) {
-        this.currentMode = '3D';
+    constructor() {
+        this.currentMode = '2D';
         this.app = (0, express_1.default)();
         this.server = http_1.default.createServer(this.app);
         this.wss = new ws_1.default.Server({ server: this.server });
-        this.scanner = new lidar_scanner_1.LidarScanner(portPath);
+        this.scanner = new lidar_1.LidarScanner();
         this.setupRoutes();
         this.setupWebSocket();
     }
@@ -28,14 +28,32 @@ class Server {
     setupWebSocket() {
         this.wss.on('connection', (ws) => {
             console.log('Client connected');
-            ws.on('message', (message) => {
+            ws.on('message', async (message) => {
                 console.log('Received message from client:', message);
                 const data = JSON.parse(message);
-                if (data.command === 'start') {
-                    this.startScanning(ws, data.mode || '3D');
+                try {
+                    if (data.command === 'list_ports') {
+                        const ports = await lidar_1.LidarScanner.listPorts();
+                        ws.send(JSON.stringify({ type: 'ports', ports }));
+                    }
+                    else if (data.command === 'connect') {
+                        await this.scanner.connect(data.port, parseInt(data.baudrate));
+                        ws.send(JSON.stringify({ type: 'status', message: 'Connected', status: 'connected' }));
+                    }
+                    else if (data.command === 'disconnect') {
+                        this.scanner.disconnect();
+                        ws.send(JSON.stringify({ type: 'status', message: 'Disconnected', status: 'disconnected' }));
+                    }
+                    else if (data.command === 'start') {
+                        this.startScanning(ws, data.mode);
+                    }
+                    else if (data.command === 'stop') {
+                        this.stopScanning(ws);
+                    }
                 }
-                else if (data.command === 'stop') {
-                    this.stopScanning(ws);
+                catch (error) {
+                    console.error("Command error:", error);
+                    ws.send(JSON.stringify({ type: 'error', message: error.message }));
                 }
             });
             ws.on('close', () => {
@@ -46,17 +64,23 @@ class Server {
     }
     startScanning(ws, mode) {
         console.log(`Starting ${mode} scan`);
-        if (this.currentMode !== mode) {
-            this.currentMode = mode;
-            this.scanner.initialize(mode);
-            this.scanner.onData((points) => {
-                if (ws.readyState === ws_1.default.OPEN) {
-                    console.log(`Sending ${points.length} points to client`);
-                    ws.send(JSON.stringify({ type: 'points', points }));
-                }
-            });
-            ws.send(JSON.stringify({ type: 'status', message: `${mode} scanning started` }));
-        }
+        this.currentMode = mode;
+        this.scanner.initialize(mode);
+        this.scanner.onStatus((status) => {
+            if (ws.readyState === ws_1.default.OPEN) {
+                ws.send(JSON.stringify({ type: 'status', message: status }));
+            }
+        });
+        this.scanner.onData((points) => {
+            if (ws.readyState === ws_1.default.OPEN) {
+                // console.log(`Sending ${points.length} points to client`);
+                ws.send(JSON.stringify({
+                    type: 'points',
+                    points: points.map((p) => ({ x: p.x, y: p.y, z: p.z }))
+                }));
+            }
+        });
+        ws.send(JSON.stringify({ type: 'status', message: `${mode} scanning started` }));
     }
     stopScanning(ws) {
         console.log('Stopping scan');

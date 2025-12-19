@@ -11,11 +11,11 @@ export class Server {
   private scanner: LidarScanner;
   private currentMode: ScanMode = '2D';
 
-  constructor(portPath: string) {
+  constructor() {
     this.app = express();
     this.server = http.createServer(this.app);
     this.wss = new WebSocket.Server({ server: this.server });
-    this.scanner = new LidarScanner(portPath);
+    this.scanner = new LidarScanner();
 
     this.setupRoutes();
     this.setupWebSocket();
@@ -32,13 +32,27 @@ export class Server {
     this.wss.on('connection', (ws) => {
       console.log('Client connected');
 
-      ws.on('message', (message: string) => {
+      ws.on('message', async (message: string) => {
         console.log('Received message from client:', message);
         const data = JSON.parse(message);
-        if (data.command === 'start') {
-          this.startScanning(ws, data.mode as ScanMode);
-        } else if (data.command === 'stop') {
-          this.stopScanning(ws);
+        try {
+            if (data.command === 'list_ports') {
+                 const ports = await LidarScanner.listPorts();
+                 ws.send(JSON.stringify({ type: 'ports', ports }));
+            } else if (data.command === 'connect') {
+                 await this.scanner.connect(data.port, parseInt(data.baudrate));
+                 ws.send(JSON.stringify({ type: 'status', message: 'Connected', status: 'connected' }));
+            } else if (data.command === 'disconnect') {
+                this.scanner.disconnect();
+                ws.send(JSON.stringify({ type: 'status', message: 'Disconnected', status: 'disconnected' }));
+            } else if (data.command === 'start') {
+                this.startScanning(ws, data.mode as ScanMode);
+            } else if (data.command === 'stop') {
+                this.stopScanning(ws);
+            }
+        } catch (error: any) {
+             console.error("Command error:", error);
+             ws.send(JSON.stringify({ type: 'error', message: error.message }));
         }
       });
 
@@ -53,6 +67,12 @@ export class Server {
     console.log(`Starting ${mode} scan`);
     this.currentMode = mode;
     this.scanner.initialize(mode);
+    this.scanner.onStatus((status: string) => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'status', message: status }));
+        }
+    });
+
     this.scanner.onData((points: LidarPoint[]) => {
       if (ws.readyState === WebSocket.OPEN) {
         // console.log(`Sending ${points.length} points to client`);

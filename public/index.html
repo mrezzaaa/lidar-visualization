@@ -7,241 +7,478 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-    <style>
-        html, body {
-            margin: 0;
-            padding: 0;
-            height: 100%;
-            width: 100%;
-            overflow: hidden;
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        gray: {
+                            850: '#1f2937',
+                            900: '#111827',
+                            950: '#030712',
+                        }
+                    }
+                }
+            }
         }
-
+    </script>
+    <style>
+        body {
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+        }
         #lidarCanvas {
             position: absolute;
             top: 0;
-            left: 0;
-            width: 100vw;
+            right: 0;
+            width: calc(100% - 320px);
             height: 100vh;
-            background-color: black;
+            background-color: #000;
             z-index: 1;
         }
-
-        .button-container {
-            position: fixed;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            display: flex;
-            gap: 10px;
-            z-index: 2;
-            background: rgba(0, 0, 0, 0.5);
-            padding: 10px 20px;
-            border-radius: 10px;
+        @media (max-width: 768px) {
+            #lidarCanvas {
+                width: 100%;
+                height: calc(100vh - 300px);
+                bottom: 0;
+                top: auto;
+            }
         }
-
-        /* Tooltip for displaying distance */
-        .tooltip {
-            position: absolute;
-            background-color: rgba(0, 0, 0, 0.7);
-            color: white;
-            padding: 5px 10px;
-            border-radius: 5px;
-            font-size: 14px;
-            pointer-events: none;
-            z-index: 3;
-            display: none; /* Hidden by default */
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1f2937;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4b5563;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6b7280;
         }
     </style>
 </head>
-<body class="bg-gray-900 text-white">
-    <!-- Floating Button Container -->
-    <div class="button-container">
-        <button id="start-scan" class="px-4 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700">
-            Start Scan
-        </button>
-        <button id="stop-scan" class="px-4 py-2 bg-red-600 text-white rounded shadow hover:bg-red-700">
-            Stop Scan
-        </button>
-        <select id="scan-mode" class="px-4 py-2 bg-gray-700 text-white rounded shadow">
-            <option value="2D" selected>2D Scan</option>
-            <option value="3D">3D Scan</option>
-        </select>
-    </div>
+<body class="bg-gray-950 text-white flex h-screen">
 
-    <!-- Fullscreen Canvas -->
-    <div id="lidarCanvas"></div>
+    <!-- Sidebar -->
+    <aside class="w-80 bg-gray-900 border-r border-gray-800 flex flex-col z-20 shadow-xl overflow-y-auto absolute md:relative h-full">
+        <div class="p-6 border-b border-gray-800">
+            <h1 class="text-xl font-bold bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent">Lidar Control</h1>
+            <p class="text-xs text-gray-500 mt-1">v1.0.0 Refactored</p>
+        </div>
 
-    <!-- Tooltip for showing distance -->
-    <div id="tooltip" class="tooltip"></div>
+        <div class="flex-1 p-6 space-y-8">
+            <!-- Connection Section -->
+            <section class="space-y-4">
+                <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Connection Settings</h2>
+                
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1">Serial Port</label>
+                        <div class="flex gap-2">
+                            <select id="port-select" class="flex-1 bg-gray-800 border border-gray-700 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 text-white placeholder-gray-400">
+                                <option value="" disabled selected>Select Port</option>
+                            </select>
+                            <button id="refresh-ports" class="p-2.5 bg-gray-800 border border-gray-700 rounded-lg hover:bg-gray-700 transition">
+                                <svg class="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1">Baud Rate</label>
+                        <select id="baudrate-select" class="bg-gray-800 border border-gray-700 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 text-white placeholder-gray-400">
+                            <option value="115200" selected>115200</option>
+                            <option value="9600">9600</option>
+                            <option value="57600">57600</option>
+                            <option value="230400">230400</option>
+                            <option value="3000000">3000000</option>
+                        </select>
+                    </div>
+
+                    <button id="connect-btn" class="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow-lg shadow-blue-500/30 transition-all duration-200 flex justify-center items-center gap-2">
+                        <span>Connect</span>
+                    </button>
+                    <div id="connection-status" class="text-xs text-center text-gray-500">Not Connected</div>
+                </div>
+            </section>
+
+            <hr class="border-gray-800" />
+
+            <!-- Scan Control Section -->
+            <section class="space-y-4 opacity-50 pointer-events-none transition-opacity duration-300" id="scan-controls">
+                <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Scan Controls</h2>
+                
+                <div class="bg-gray-800 rounded-lg p-1 flex">
+                    <button id="mode-2d" class="flex-1 py-1.5 text-sm rounded-md bg-gray-700 text-white shadow font-medium transition">2D</button>
+                    <button id="mode-3d" class="flex-1 py-1.5 text-sm rounded-md text-gray-400 hover:text-white hover:bg-gray-700/50 transition">3D</button>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 pt-2">
+                    <button id="start-scan" class="py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg shadow-lg shadow-emerald-500/20 transition-all flex justify-center items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        Start
+                    </button>
+                    <button id="stop-scan" class="py-3 px-4 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg shadow-lg shadow-red-500/20 transition-all flex justify-center items-center gap-2" disabled>
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"></path></svg>
+                        Stop
+                    </button>
+                </div>
+            </section>
+        </div>
+
+        <div class="p-6 border-t border-gray-800">
+            <div class="space-y-2">
+                 <div class="text-xs text-gray-600 flex justify-between">
+                    <span>Status</span>
+                    <span id="system-status" class="text-gray-400">Idle</span>
+                </div>
+                <div class="text-xs text-gray-600 flex justify-between">
+                    <span>Firmware</span>
+                    <span id="info-fw" class="text-gray-400">-</span>
+                </div>
+                <div class="text-xs text-gray-600 flex justify-between">
+                    <span>Hardware</span>
+                    <span id="info-hw" class="text-gray-400">-</span>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Canvas Area -->
+    <main class="flex-1 relative bg-black">
+        <div id="lidarCanvas"></div>
+        <div id="tooltip" class="absolute hidden bg-black/80 backdrop-blur text-white text-xs px-2 py-1 rounded border border-gray-700 pointer-events-none z-50"></div>
+        
+        <!-- Overlay Stats -->
+        <div class="absolute top-4 right-4 z-10 flex gap-4">
+            <div class="bg-gray-900/80 backdrop-blur border border-gray-800 rounded-lg p-3 text-xs w-32">
+                <div class="text-gray-500 mb-1">Points</div>
+                <div id="stats-points" class="text-lg font-mono font-bold text-white">0</div>
+            </div>
+             <div class="bg-gray-900/80 backdrop-blur border border-gray-800 rounded-lg p-3 text-xs w-32">
+                <div class="text-gray-500 mb-1">FPS</div>
+                <div id="stats-fps" class="text-lg font-mono font-bold text-white">0</div>
+            </div>
+        </div>
+    </main>
 
     <script>
+        // --- Logic ---
         const container = document.getElementById('lidarCanvas');
         const tooltip = document.getElementById('tooltip');
-        let scene, camera, renderer, pointsMesh, lineMesh, controls;
-        let ws;
-        let currentPoints = [];
-        let previousPoints = [];
-        let scale = 0.5;
-        const smoothingFactor = 0.3; 
+        
+        // UI Elements
+        const portSelect = document.getElementById('port-select');
+        const baudRateSelect = document.getElementById('baudrate-select');
+        const refreshBtn = document.getElementById('refresh-ports');
+        const connectBtn = document.getElementById('connect-btn');
+        const connectionStatus = document.getElementById('connection-status');
+        const scanControls = document.getElementById('scan-controls');
+        
+        const mode2dBtn = document.getElementById('mode-2d');
+        const mode3dBtn = document.getElementById('mode-3d');
+        const startScanBtn = document.getElementById('start-scan');
+        const stopScanBtn = document.getElementById('stop-scan');
+        const systemStatus = document.getElementById('system-status');
+        const statsPoints = document.getElementById('stats-points');
+        const statsFps = document.getElementById('stats-fps');
 
-        function init() {
-            // Initialize Three.js scene
+        let ws;
+        let isConnected = false;
+        let isScanning = false;
+        let currentMode = '2D'; // '2D' or '3D'
+
+        // Three.js
+        let scene, camera, renderer, pointsMesh, controls;
+        let currentPoints = [];
+        let frameCount = 0;
+        let lastTime = performance.now();
+
+        // Initialize Three.js
+        function initThree() {
             scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            renderer = new THREE.WebGLRenderer();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            // Starry background
+            const starsGeometry = new THREE.BufferGeometry();
+            const starsVertices = [];
+            for(let i=0; i<1000; i++) {
+                starsVertices.push(THREE.MathUtils.randFloatSpread(2000));
+                starsVertices.push(THREE.MathUtils.randFloatSpread(2000));
+                starsVertices.push(THREE.MathUtils.randFloatSpread(2000));
+            }
+            starsGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starsVertices, 3));
+            const starsMaterial = new THREE.PointsMaterial({color: 0x888888});
+            const starField = new THREE.Points(starsGeometry, starsMaterial);
+            scene.add(starField);
+
+            camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 5000);
+            camera.position.set(50, 50, 100);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
             container.appendChild(renderer.domElement);
 
-            // Add grid and axes
-            addGrid();
-            addAxes();
+            // Helpers
+            const gridHelper = new THREE.GridHelper(300, 30, 0x333333, 0x111111);
+            scene.add(gridHelper);
+            const axesHelper = new THREE.AxesHelper(20);
+            scene.add(axesHelper);
 
-            // Add Orbit Controls
             controls = new THREE.OrbitControls(camera, renderer.domElement);
-            camera.position.z = 100;
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
 
             window.addEventListener('resize', onWindowResize, false);
-            document.addEventListener('mousemove', showTooltip);
-
+            // container.addEventListener('mousemove', onMouseMove); 
+            // Note: Tooltip logic can be expensive, disabled for performance in this iteration or can added back carefully
+            
             animate();
         }
 
-        function addGrid() {
-            const size = 200;
-            const divisions = 20;
-            const gridHelper = new THREE.GridHelper(size, divisions);
-            gridHelper.rotation.x = Math.PI / 2; // Rotate to align with XY plane
-            scene.add(gridHelper);
-        }
-
-        function addAxes() {
-            const axesHelper = new THREE.AxesHelper(50000);
-            scene.add(axesHelper);
-        }
-
         function onWindowResize() {
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.aspect = container.clientWidth / container.clientHeight;
             camera.updateProjectionMatrix();
-        }
-
-        function createPointsMesh(points) {
-            if (pointsMesh) {
-                scene.remove(pointsMesh);
-            }
-            if (points.length === 0) return;
-
-            const geometry = new THREE.BufferGeometry();
-            const vertices = new Float32Array(points.length * 3);
-            points.forEach((point, index) => {
-                vertices[index * 3] = point.x ;
-                vertices[index * 3 + 1] = point.y ;
-                vertices[index * 3 + 2] = point.z  || 0; // Default to 0 if z is undefined
-            });
-            geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-            const material = new THREE.PointsMaterial({ color: 0x00ff00, size: 0.5 });
-            pointsMesh = new THREE.Points(geometry, material);
-            scene.add(pointsMesh);
-        }
-
-        function createLineMesh(points) {
-            if (lineMesh) {
-                scene.remove(lineMesh);
-            }
-            if (points.length === 0) return;
-
-            const geometry = new THREE.BufferGeometry();
-            const vertices = new Float32Array(points.length * 3);
-            points.forEach((point, index) => {
-                vertices[index * 3] = point.x;
-                vertices[index * 3 + 1] = point.y;
-                vertices[index * 3 + 2] = point.z || 0; // Default to 0 if z is undefined
-            });
-            geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-            const material = new THREE.LineBasicMaterial({ color: 0xff5555 });
-            lineMesh = new THREE.Line(geometry, material);
-            scene.add(lineMesh);
-        }
-
-        function updatePoints(newPoints) {
-            previousPoints = currentPoints;
-            currentPoints = newPoints;
-            currentPoints = smoothData(currentPoints, previousPoints);
-            createPointsMesh(currentPoints);
-            createLineMesh(currentPoints);
-        }
-
-        function smoothData(currentPoints, previousPoints) {
-            return currentPoints.map((point, index) => {
-                if (previousPoints[index]) {
-                    return {
-                        x: point.x * (1 - smoothingFactor) + previousPoints[index].x * smoothingFactor,
-                        y: point.y * (1 - smoothingFactor) + previousPoints[index].y * smoothingFactor,
-                        z: point.z * (1 - smoothingFactor) + (previousPoints[index].z || 0) * smoothingFactor
-                    };
-                }
-                return point;
-            });
+            renderer.setSize(container.clientWidth, container.clientHeight);
         }
 
         function animate() {
             requestAnimationFrame(animate);
             controls.update();
             renderer.render(scene, camera);
-        }
 
-        function connectWebSocket() {
-            ws = new WebSocket('ws://localhost:3000');
-            ws.onopen = () => console.log('WebSocket connected');
-
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                console.log("Received data:", data);
-                if (data.type === 'points') {
-                    updatePoints(data.points);
-                } else if (data.type === 'status') {
-                    console.log(data.message);
-                }
-            };
-            ws.onclose = () => connectWebSocket();
-        }
-
-        function showTooltip(event) {
-            if (!pointsMesh) return;
-
-            const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
-            const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
-
-            const raycaster = new THREE.Raycaster();
-            const mouse = new THREE.Vector2(mouseX, mouseY);
-            raycaster.setFromCamera(mouse, camera);
-
-            const intersects = raycaster.intersectObject(pointsMesh);
-
-            if (intersects.length > 0) {
-                const point = intersects[0].point;
-                const distance = point.distanceTo(new THREE.Vector3(0, 0, 0)).toFixed(2);
-                tooltip.style.left = (event.clientX + 10) + 'px';
-                tooltip.style.top = (event.clientY + 10) + 'px';
-                tooltip.textContent = `Distance: ${distance  * 10 } mm`;
-                tooltip.style.display = 'block';
-            } else {
-                tooltip.style.display = 'none';
+            // FPS Counter
+            frameCount++;
+            const currentTime = performance.now();
+            if (currentTime - lastTime >= 1000) {
+                statsFps.innerText = frameCount;
+                frameCount = 0;
+                lastTime = currentTime;
             }
         }
 
-        // Button event listeners
-        document.getElementById('start-scan').addEventListener('click', () => {
-            const mode = document.getElementById('scan-mode').value;
-            ws.send(JSON.stringify({ command: 'start', mode }));
+        function updateReduction(points) {
+             if (pointsMesh) {
+                scene.remove(pointsMesh);
+                pointsMesh.geometry.dispose();
+                pointsMesh.material.dispose();
+            }
+            if (!points || points.length === 0) return;
+
+            const geometry = new THREE.BufferGeometry();
+            const vertices = new Float32Array(points.length * 3);
+            const colors = new Float32Array(points.length * 3);
+            
+            // Color map based on height (Y) or Distance
+            const color = new THREE.Color();
+
+            points.forEach((p, i) => {
+                vertices[i * 3] = p.x;
+                vertices[i * 3 + 1] = p.y; // Use Y as up in Three.js? Lidar usually Z is up, but config.ts has x,y,z
+                // Let's assume Z is up for visualization if config maps it differently, but typically Y is up in ThreeJS.
+                // Looking at config, it seems X,Y,Z are raw coords. Let's map to ThreeJS coords.
+                // Usually: Lidar X -> Three X, Lidar Y -> Three Z, Lidar Z -> Three Y
+                vertices[i * 3 + 1] = p.z || 0; // Height
+                vertices[i * 3 + 2] = p.y; // Depth
+                
+                // Color by height
+                const height = p.z || 0;
+                const normalizedHeight = Math.min(Math.max((height + 10) / 50, 0), 1);
+                color.setHSL(0.6 - (normalizedHeight * 0.4), 1.0, 0.5); // Blue to Green/Yellow
+                
+                colors[i * 3] = color.r;
+                colors[i * 3 + 1] = color.g;
+                colors[i * 3 + 2] = color.b;
+            });
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const material = new THREE.PointsMaterial({ size: 0.8, vertexColors: true });
+            pointsMesh = new THREE.Points(geometry, material);
+            scene.add(pointsMesh);
+            
+            statsPoints.innerText = points.length;
+        }
+
+
+        // --- WebSocket ---
+        function connectWebSocket() {
+            ws = new WebSocket('ws://' + window.location.host);
+            
+            ws.onopen = () => {
+                console.log("WS Connected");
+                systemStatus.innerText = "WS Connected";
+                ws.send(JSON.stringify({ command: 'list_ports' }));
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'ports') {
+                    updatePortSelect(data.ports);
+                } else if (data.type === 'status') {
+                    console.log("Status:", data);
+                    if (data.status === 'connected') {
+                        setUIConnected(true);
+                    } else if (data.status === 'disconnected') {
+                        setUIConnected(false);
+                    }
+                    systemStatus.innerText = data.message;
+                    
+                    // Parse Device Info
+                    if (data.message.startsWith('Device Info:')) {
+                        // "Device Info: FW vX.X.X, HW vX.X.X"
+                        const match = data.message.match(/FW v([\d\.]+), HW v([\d\.]+)/);
+                        if (match) {
+                            document.getElementById('info-fw').innerText = "v" + match[1];
+                            document.getElementById('info-hw').innerText = "v" + match[2];
+                        }
+                    }
+
+                } else if (data.type === 'points') {
+                    updateReduction(data.points);
+                } else if (data.type === 'error') {
+                     systemStatus.innerText = "Error: " + data.message;
+                     alert("Error: " + data.message);
+                     setUIConnected(false); // Assume disconnected on error for safety
+                }
+            }
+
+            ws.onclose = () => {
+                console.log("WS Closed");
+                systemStatus.innerText = "WS Disconnected";
+                setTimeout(connectWebSocket, 2000);
+            }
+        }
+
+        // --- UI Interactions ---
+
+        function updatePortSelect(ports) {
+            portSelect.innerHTML = '<option value="" disabled selected>Select Port</option>';
+            ports.forEach(port => {
+                const option = document.createElement('option');
+                option.value = port;
+                option.text = port;
+                portSelect.appendChild(option);
+            });
+        }
+
+        refreshBtn.addEventListener('click', () => {
+             ws.send(JSON.stringify({ command: 'list_ports' }));
         });
 
-        document.getElementById('stop-scan').addEventListener('click', () => {
-            ws.send(JSON.stringify({ command: 'stop' }));
+        connectBtn.addEventListener('click', () => {
+             if (isConnected) {
+                 // Disconnect
+                 ws.send(JSON.stringify({ command: 'disconnect' }));
+             } else {
+                 // Connect
+                 const port = portSelect.value;
+                 const baud = baudRateSelect.value;
+                 if (!port) {
+                     alert("Please select a port");
+                     return;
+                 }
+                 systemStatus.innerText = "Connecting...";
+                 ws.send(JSON.stringify({ command: 'connect', port: port, baudrate: baud }));
+             }
         });
 
-        init();
+        function setUIConnected(connected) {
+            isConnected = connected;
+            if (connected) {
+                connectBtn.innerHTML = '<span>Disconnect</span>';
+                connectBtn.classList.replace('bg-blue-600', 'bg-red-600');
+                connectBtn.classList.replace('hover:bg-blue-700', 'hover:bg-red-700');
+                connectBtn.classList.replace('shadow-blue-500/30', 'shadow-red-500/30');
+                
+                connectionStatus.innerText = "Connected";
+                connectionStatus.classList.add('text-green-500');
+                connectionStatus.classList.remove('text-gray-500');
+                
+                scanControls.classList.remove('opacity-50', 'pointer-events-none');
+                portSelect.disabled = true;
+                baudRateSelect.disabled = true;
+            } else {
+                connectBtn.innerHTML = '<span>Connect</span>';
+                connectBtn.classList.replace('bg-red-600', 'bg-blue-600');
+                connectBtn.classList.replace('hover:bg-red-700', 'hover:bg-blue-700');
+                connectBtn.classList.replace('shadow-red-500/30', 'shadow-blue-500/30');
+                
+                connectionStatus.innerText = "Not Connected";
+                connectionStatus.classList.remove('text-green-500');
+                connectionStatus.classList.add('text-gray-500');
+                
+                scanControls.classList.add('opacity-50', 'pointer-events-none');
+                portSelect.disabled = false;
+                baudRateSelect.disabled = false;
+                
+                // Stop scan logic if active
+                if (isScanning) toggleScanUI(false);
+            }
+        }
+
+        mode2dBtn.addEventListener('click', () => setMode('2D'));
+        mode3dBtn.addEventListener('click', () => setMode('3D'));
+
+        function setMode(mode) {
+            currentMode = mode;
+            if (mode === '2D') {
+                mode2dBtn.classList.remove('bg-gray-700', 'text-gray-400', 'hover:text-white', 'hover:bg-gray-700/50');
+                mode2dBtn.classList.add('bg-gray-700', 'text-white', 'shadow');
+                
+                mode3dBtn.classList.add('text-gray-400', 'hover:text-white', 'hover:bg-gray-700/50');
+                mode3dBtn.classList.remove('bg-gray-700', 'text-white', 'shadow');
+            } else {
+                mode3dBtn.classList.remove('bg-gray-700', 'text-gray-400', 'hover:text-white', 'hover:bg-gray-700/50');
+                mode3dBtn.classList.add('bg-gray-700', 'text-white', 'shadow');
+                
+                mode2dBtn.classList.add('text-gray-400', 'hover:text-white', 'hover:bg-gray-700/50');
+                mode2dBtn.classList.remove('bg-gray-700', 'text-white', 'shadow');
+            }
+        }
+
+        startScanBtn.addEventListener('click', () => {
+             ws.send(JSON.stringify({ command: 'start', mode: currentMode }));
+             toggleScanUI(true);
+        });
+
+        stopScanBtn.addEventListener('click', () => {
+             ws.send(JSON.stringify({ command: 'stop' }));
+             toggleScanUI(false);
+        });
+
+        function toggleScanUI(scanning) {
+            isScanning = scanning;
+            if (scanning) {
+                startScanBtn.disabled = true;
+                startScanBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                stopScanBtn.disabled = false;
+                stopScanBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                mode2dBtn.disabled = true;
+                mode3dBtn.disabled = true;
+            } else {
+                startScanBtn.disabled = false;
+                startScanBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                stopScanBtn.disabled = true;
+                stopScanBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                mode2dBtn.disabled = false;
+                mode3dBtn.disabled = false;
+            }
+        }
+
+        // Init
+        initThree();
         connectWebSocket();
+
     </script>
 </body>
 </html>

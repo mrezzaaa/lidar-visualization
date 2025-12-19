@@ -1,6 +1,6 @@
 import { SerialPort } from 'serialport';
 import { Buffer } from 'buffer';
-import { Command, lidarAngleCamera, LidarError2D, LidarError3D, lidarPixelRealSize, lidarRealImageSize, LidarResponse, LidarSpec, lidartablex, lidartabley, lidartablez } from './config';
+import { Command, getBaudRateCommand, lidarAngleCamera, LidarError2D, LidarError3D, lidarPixelRealSize, lidarRealImageSize, LidarResponse, LidarSpec, lidartablex, lidartabley, lidartablez } from './config';
 
 export type ScanMode = '2D' | '3D';
 
@@ -11,54 +11,159 @@ export interface LidarPoint {
 }
 
 export class LidarScanner {
-  private port: SerialPort;
+  private port: SerialPort | null = null;
   private serialdata: string = '';
   private dataCallback: ((points: LidarPoint[]) => void) | null = null;
+  private statusCallback: ((status: string) => void) | null = null;
   private currentMode: ScanMode = '2D';
+  private pendingResponse: { pattern: string, resolve: () => void } | null = null;
   private tablex = lidartablex;
   private tabley = lidartabley;
   private tablez = lidartablez;
 
 
-  constructor(portPath: string) {
-    this.port = new SerialPort({ path: portPath, baudRate: 115200 });
-    this.port.on('open', () => {
-      console.log('Serial port opened');
-      setTimeout(() => {
-        this.initialize(this.currentMode);
-      }, 1000);
-    });
-    this.port.on('error', (err) => console.error('Serial port error:', err));
-    this.port.on('data', (data: Buffer) => {
-      this.dataListener(data.toString('hex'));
-    });
+  constructor() {}
+
+  static async listPorts(): Promise<string[]> {
+    const ports = await SerialPort.list();
+    return ports.map(p => p.path);
   }
 
-  initialize(mode: ScanMode): void {
+  connect(portPath: string, baudRate: number = 115200): Promise<void> {
+    this.emitStatus(`Connecting to ${portPath} at ${baudRate}...`);
+    return new Promise((resolve, reject) => {
+        if (this.port && this.port.isOpen) {
+            this.port.close();
+        }
+        
+        this.port = new SerialPort({ path: portPath, baudRate: baudRate });
+
+        this.port.on('open', async () => {
+            this.emitStatus("Port opened. Stabilizing connection...");
+            console.log(`Serial port ${portPath} opened at ${baudRate}`);
+            
+            // Wait for port stability
+            await this.delay(500);
+
+            try {
+                // Get Device Info immediately after connection
+                await this.sendCommandAndWait(Command.deviceinfo, LidarResponse.deviceinfo, "Getting Device Info...");
+            } catch (e) {
+                console.warn("Could not get device info immediately:", e);
+                this.emitStatus("Warning: Device info check skipped.");
+            }
+
+            this.emitStatus("Connection Established.");
+            resolve();
+            
+            // Start initialization (Config & Scan) sequence
+            setTimeout(() => {
+                this.initialize(this.currentMode);
+            }, 500);
+        });
+
+        this.port.on('error', (err) => {
+            console.error('Serial port error:', err);
+             this.emitStatus(`Connection Error: ${err.message}`);
+             reject(err);
+        });
+
+        this.port.on('data', (data: Buffer) => {
+            this.dataListener(data.toString('hex'));
+        });
+    })
+  }
+ 
+  disconnect(): void {
+      if (this.port && this.port.isOpen) {
+          this.port.close((err) => {
+              if (err) console.error('Error closing port:', err);
+              else console.log('Serial port disconnected');
+          });
+      }
+      this.port = null;
+  }
+
+  async initialize(mode: ScanMode): Promise<void> {
     this.currentMode = mode;
-    console.log(`Initializing ${mode} scan mode`);
+    this.emitStatus(`Initializing ${mode} scan mode (Async)`);
     // this.distort3DLens();
     this.Distortion3D();
 
-    let sequence = [
-      { fn: () => this.getDeviceInfo() },
-      { fn: () => this.setBaudrate() },
-      { fn: () => this.setFrequency() },
-      { fn: () => this.setPulse() },
-      { fn: () => this.setSensitivity() },
-      { fn: () => (mode === '2D' ? this.scan2D() : this.scan3D()) },
-    ];
+    try {
+        // Device info is already fetched in connect(), but we can do it again or skip. 
+        // Let's keep the config sequence here.
+        
+        // Config commands do not send ACKs, so we just send them with a small delay
+        if (this.port) {
+             const rate = this.port.baudRate;
+             const cmd = getBaudRateCommand(rate);
+             this.emitStatus("Setting Baudrate...");
+             this.port.write(cmd);
+             await this.delay(100);
+        }
 
-    sequence.forEach((item, index) => {
-      setTimeout(() => {
-        console.log('Executing...', item.fn);
-        item.fn();
-      }, (index + 1) * 100);
-    });
+        this.emitStatus("Setting Frequency...");
+        this.port?.write(Command.frequency);
+        await this.delay(100);
+
+        this.emitStatus("Setting Pulse...");
+        this.port?.write(Command.pulse);
+        await this.delay(100);
+
+        this.emitStatus("Setting Sensitivity...");
+        this.port?.write(Command.sensitivity);
+        await this.delay(100);
+        
+        this.emitStatus(`Starting ${mode} Scan...`);
+        if (mode === '2D') this.scan2D();
+        else this.scan3D();
+    } catch (e: any) {
+        this.emitStatus(`Initialization Error: ${e.message}`);
+        console.error(e);
+    }
+  }
+
+  private sendCommandAndWait(cmd: Buffer, expectedPattern: string, statusMsg: string, timeoutMs: number = 2000): Promise<void> {
+      return new Promise((resolve, reject) => {
+          this.emitStatus(statusMsg);
+          this.pendingResponse = { pattern: expectedPattern, resolve };
+          
+          this.port?.write(cmd, (err) => {
+              if (err) {
+                  this.pendingResponse = null;
+                  reject(err);
+              }
+          });
+
+          setTimeout(() => {
+              if (this.pendingResponse && this.pendingResponse.pattern === expectedPattern) {
+                  console.warn(`Timeout waiting for ${statusMsg}`);
+                  // We resolve anyway to continue sequence, but log warning
+                   this.pendingResponse = null;
+                   resolve();
+              }
+          }, timeoutMs);
+      });
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   private dataListener(data: string): void {
     this.serialdata += data;
+    
+    // Check for pending response
+    if (this.pendingResponse && this.serialdata.includes(this.pendingResponse.pattern)) {
+        console.log(`Received expected response: ${this.pendingResponse.pattern}`);
+        this.pendingResponse.resolve();
+        this.pendingResponse = null;
+        // Optionally consume the buffer so we don't re-trigger? 
+        // For simple ACK, it might be fine.
+        // But let's proceed to specific handlers.
+    }
+
     if (this.serialdata.includes(LidarResponse.deviceinfo) && this.serialdata.length > 22) {
       this.handleDeviceInfo();
     } else if (this.serialdata.includes(LidarResponse.scan2D) && this.serialdata.length >= LidarSpec.width * 4 + 18) {
@@ -70,14 +175,33 @@ export class LidarScanner {
 
   private handleDeviceInfo(): void {
     this.serialdata = this.serialdata.replace(LidarResponse.deviceinfo, '');
-    console.log('Device info:', this.serialdata);
-    let major = this.serialdata.slice(0, 2);
-    let minor = this.serialdata.slice(2, 4);
-    let patch = this.serialdata.slice(4, 6);
-    let hw1 = this.serialdata.slice(6, 8);
-    let hw2 = this.serialdata.slice(8, 10);
-    let hw3 = this.serialdata.slice(10, 12);
-    console.log(`Version ${parseInt(major, 16)}.${parseInt(minor, 16)}.${parseInt(patch, 16)} HW: ${parseInt(hw1, 16)}.${parseInt(hw2, 16)}.${parseInt(hw3, 16)}`);
+    console.log('Device info raw:', this.serialdata); 
+    // Expecting 6 bytes (12 hex chars)
+    if (this.serialdata.length < 12) return;
+
+    let major = parseInt(this.serialdata.slice(0, 2), 16);
+    let minor = parseInt(this.serialdata.slice(2, 4), 16);
+    let patch = parseInt(this.serialdata.slice(4, 6), 16);
+    let hw1 = parseInt(this.serialdata.slice(6, 8), 16);
+    let hw2 = parseInt(this.serialdata.slice(8, 10), 16);
+    let hw3 = parseInt(this.serialdata.slice(10, 12), 16);
+    
+    const info = {
+        firmware: `${major}.${minor}.${patch}`,
+        hardware: `${hw1}.${hw2}.${hw3}`
+    };
+    
+    console.log(`Version ${info.firmware} HW: ${info.hardware}`);
+    this.emitStatus(`Device Info: FW v${info.firmware}, HW v${info.hardware}`);
+    
+    // Also emit specific device info event if needed, but status is okay for now.
+    // Let's modify callback to support type checking or just send a specific message format
+    if (this.dataCallback) { 
+        // We can't use dataCallback for this.
+        // Let's rely on status for now or add a new event.
+        // The user wants to "Get Device Info", likely explicitly.
+    }
+    
     this.serialdata = '';
   }
 
@@ -145,7 +269,19 @@ export class LidarScanner {
     this.dataCallback = callback;
   }
 
+  onStatus(callback: (status: string) => void): void {
+      this.statusCallback = callback;
+  }
+
+  private emitStatus(msg: string): void {
+      if (this.statusCallback) {
+          this.statusCallback(msg);
+      }
+      console.log(msg);
+  }
+
   getDeviceInfo(): void {
+    if(!this.port) return;
     this.port.write(Buffer.from([0x5A, 0x77, 0xFF, 0x02, 0x00, 0x10, 0x00, 0x12]), (err) => {
       if (err) console.log(err);
       console.info('Getting device info', Command.deviceinfo);
@@ -153,6 +289,7 @@ export class LidarScanner {
   }
 
   scan3D(): void {
+    if(!this.port) return;
     this.port.write(Command.scan3D, (err) => {
       if (err) console.log(err);
       console.info('Scanning 3D', Command.scan3D);
@@ -160,6 +297,7 @@ export class LidarScanner {
   }
 
   scan2D(): void {
+    if(!this.port) return;
     this.port.write(Command.scan2D, (err) => {
       if (err) console.log(err);
       console.info('Scanning 2D', Command.scan2D);
@@ -167,6 +305,7 @@ export class LidarScanner {
   }
 
   setFrequency(): void {
+    if(!this.port) return;
     this.port.write(Command.frequency, (err) => {
       if (err) console.log(err);
       console.info('Setting frequency', Command.frequency);
@@ -174,6 +313,7 @@ export class LidarScanner {
   }
   
   setPulse(): void {
+    if(!this.port) return;
     this.port.write(Command.pulse, (err) => {
       if (err) console.log(err);
       console.info('Setting pulse', Command.pulse);
@@ -181,6 +321,7 @@ export class LidarScanner {
   }
 
   setSensitivity(): void {
+    if(!this.port) return;
     this.port.write(Command.sensitivity, (err) => {
       if (err) console.log(err);
       console.info('Setting sensitivity', Command.sensitivity);
@@ -188,13 +329,17 @@ export class LidarScanner {
   }
 
   setBaudrate(): void {
-    this.port.write(Command.baudrate, (err) => {
+    if(!this.port) return;
+    const rate = this.port.baudRate;
+    const cmd = getBaudRateCommand(rate);
+    this.port.write(cmd, (err) => {
       if (err) console.log(err);
-      console.info('Setting baudrate', Command.baudrate);
+      console.info(`Setting baudrate to ${rate}`, cmd);
     });
   }
 
   stopScan(): void {
+    if(!this.port) return;
     this.port.write(Command.shutdown, (err) => {
       if (err) console.log(err);
       console.log('Stopping scan...');
@@ -285,6 +430,7 @@ export class LidarScanner {
     }
 
   shutdown(): void {
+    if(!this.port) return;
     this.port.write(Command.shutdown, (err) => {
       if (err) console.log(err);
       console.log('Shutting down...');
@@ -293,5 +439,6 @@ export class LidarScanner {
       if (err) console.log(err);
       console.log('Serial port closed');
     });
+    this.port = null;
   }
 }
