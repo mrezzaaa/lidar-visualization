@@ -79,17 +79,11 @@ const BAUDRATES: { [key: number]: number } = {
 
 export class CygLidarD1 extends EventEmitter {
   private port: SerialPort | null = null;
-  private dataBuffer: Buffer = Buffer.alloc(0);
+  private serialData: string = '';  // String-based like lidar.ts!
   private isConnected: boolean = false;
   private currentBaudrate: number = 115200;
   private currentPort: string = '';
   private skipStopOnDisconnect: boolean = false;
-
-  // Packet parsing state
-  private parsingState: 'HEADER1' | 'HEADER2' | 'HEADER3' | 'LENGTH_LSB' | 'LENGTH_MSB' | 'PAYLOAD_HEADER' | 'PAYLOAD_DATA' | 'CHECKSUM' = 'HEADER1';
-  private packetBuffer: Buffer = Buffer.alloc(20000);
-  private payloadSize: number = 0;
-  private payloadCount: number = 0;
 
   constructor() {
     super();
@@ -165,8 +159,7 @@ export class CygLidarD1 extends EventEmitter {
         }
         this.port = null;
         this.isConnected = false;
-        this.dataBuffer = Buffer.alloc(0);
-        this.resetParser();
+        this.serialData = '';  // Clear string data
         resolve();
       });
     });
@@ -335,111 +328,100 @@ export class CygLidarD1 extends EventEmitter {
   // ==================== Data Reception & Parsing ====================
 
   private handleIncomingData(data: Buffer): void {
-    // Add to buffer
-    this.dataBuffer = Buffer.concat([this.dataBuffer, data]);
-    console.log('[RX] Received', data.length, 'bytes, buffer size:', this.dataBuffer.length);
+    // String-based approach from lidar.ts (STABLE!)
+    this.serialData += data.toString('hex');
+    console.log('[RX] Received', data.length, 'bytes, serialData length:', this.serialData.length / 2, 'bytes');
 
-    // Parse packets
-    while (this.dataBuffer.length > 0) {
-      const result = this.parseNextByte();
-      if (!result) {
-        break; // Need more data
-      }
-    }
+    // Process using string detection (lidar.ts line 60-68)
+    this.processSerialData();
   }
 
-  private parseNextByte(): boolean {
-    if (this.dataBuffer.length === 0) {
-      return false;
+  private processSerialData(): void {
+    const SCAN_2D_HEADER = '5a77ff430101';  // From config.ts LidarResponse.scan2D
+    const EXPECTED_2D_LENGTH = 160 * 4 + 18;  // 658 hex chars (lidar.ts line 64)
+
+    // Check for 2D scan data
+    if (this.serialData.includes(SCAN_2D_HEADER) && this.serialData.length >= EXPECTED_2D_LENGTH) {
+      console.log('[PARSE] 2D data detected');
+      this.handle2DData();
     }
-
-    const byte = this.dataBuffer[0];
-    this.dataBuffer = this.dataBuffer.slice(1);
-
-    switch (this.parsingState) {
-      case 'HEADER1':
-        if (byte === PROTOCOL.NORMAL_MODE) {
-          this.packetBuffer[0] = byte;
-          this.parsingState = 'HEADER2';
-          console.log('[PARSE] Header1 found: 0x5A');
-        }
-        break;
-
-      case 'HEADER2':
-        if (byte === PROTOCOL.PRODUCT_CODE) {
-          this.packetBuffer[1] = byte;
-          this.parsingState = 'HEADER3';
-          console.log('[PARSE] Header2 found: 0x77');
-        } else {
-          console.log('[PARSE] Expected 0x77, got', byte.toString(16));
-          this.resetParser();
-          if (byte === PROTOCOL.NORMAL_MODE) {
-            this.packetBuffer[0] = byte;
-            this.parsingState = 'HEADER2';
-          }
-        }
-        break;
-
-      case 'HEADER3':
-        this.packetBuffer[2] = byte; // ID
-        this.parsingState = 'LENGTH_LSB';
-        break;
-
-      case 'LENGTH_LSB':
-        this.packetBuffer[3] = byte;
-        this.parsingState = 'LENGTH_MSB';
-        break;
-
-      case 'LENGTH_MSB':
-        this.packetBuffer[4] = byte;
-        this.payloadSize = ((byte << 8) & 0xFF00) | (this.packetBuffer[3] & 0x00FF);
-        this.payloadCount = 0;
-        this.parsingState = 'PAYLOAD_HEADER';
-        console.log('[PARSE] Payload size:', this.payloadSize, 'bytes');
-        break;
-
-      case 'PAYLOAD_HEADER':
-        this.packetBuffer[5] = byte;
-        this.payloadCount = 1;
-        this.parsingState = 'PAYLOAD_DATA';
-        console.log('[PARSE] Payload header: 0x' + byte.toString(16).padStart(2, '0'));
-        break;
-
-      case 'PAYLOAD_DATA':
-        this.packetBuffer[5 + this.payloadCount] = byte;
-        this.payloadCount++;
-
-        if (this.payloadCount >= this.payloadSize) {
-          this.parsingState = 'CHECKSUM';
-        }
-        break;
-
-      case 'CHECKSUM':
-        // Verify checksum
-        let calculatedChecksum = 0;
-        for (let i = 3; i < 6 + this.payloadSize; i++) {
-          calculatedChecksum ^= this.packetBuffer[i];
-        }
-
-        if (calculatedChecksum === byte) {
-          // Valid packet - process it
-          console.log('[PARSE] ✓ Checksum OK, total packet size:', 6 + this.payloadSize, 'bytes');
-          this.processPacket(this.packetBuffer.slice(0, 6 + this.payloadSize));
-        } else {
-          console.error('[PARSE] ✗ Checksum mismatch!', 'Expected:', calculatedChecksum, 'Got:', byte);
-        }
-
-        this.resetParser();
-        break;
-    }
-
-    return true;
+    // Could add 3D and device info checks here
   }
 
-  private resetParser(): void {
-    this.parsingState = 'HEADER1';
-    this.payloadCount = 0;
-    this.payloadSize = 0;
+  private handle2DData(): void {
+    // Header for 161 points (Payload size 323 = 0x0143)
+    // 5A 77 FF (Head) + 43 01 (Len LE) + 01 (Type) -> 5a77ff430101
+    const HEADER_2D = '5a77ff430101';
+    const POINTS_COUNT = 161;
+    // Packet: 3(Head)+2(Len)+1(Type)+322(Data)+1(CS) = 329 bytes
+    const TOTAL_BYTES = 329;
+    const HEX_LEN = TOTAL_BYTES * 2;
+
+    const headerPos = this.serialData.indexOf(HEADER_2D);
+
+    // 1. Buffer Maintenance: If no header found and buffer grows too large, clear it
+    if (headerPos === -1) {
+        if (this.serialData.length > HEX_LEN * 2) {
+            // Buffer growing with garbage? Clear it to prevent memory leak
+            this.serialData = ''; 
+        }
+        return; 
+    }
+
+    // 2. Align Buffer: Remove data before header
+    if (headerPos > 0) {
+        this.serialData = this.serialData.substring(headerPos);
+    }
+
+    // 3. Wait for Full Packet
+    if (this.serialData.length < HEX_LEN) {
+        return;
+    }
+
+    // 4. Extract Packet
+    const packetHex = this.serialData.substring(0, HEX_LEN);
+    const buffer = Buffer.from(packetHex, 'hex');
+
+    // 5. Verify Checksum (Start from Index 3 to End-1)
+    let calcCS = 0;
+    for (let i = 3; i < TOTAL_BYTES - 1; i++) {
+        calcCS ^= buffer[i];
+    }
+    const recvCS = buffer[TOTAL_BYTES - 1];
+
+    if (calcCS !== recvCS) {
+        console.warn(`[2D] Checksum mismatch: Calc ${calcCS.toString(16)} != Recv ${recvCS.toString(16)}`);
+        // We warn but allow processing to maintain data flow (Soft Validation)
+    }
+
+    // 6. Process 161 Points
+    const points: LidarPoint2D[] = [];
+    const HFOV = 120.0;
+    const STEP = 0.75;
+
+    for (let i = 0; i < POINTS_COUNT; i++) {
+        const offset = 6 + (i * 2);
+        
+        // EMPIRICAL EVIDENCE: Big Endian works!
+        // Log Data: '07 4e' -> BE: 1870mm (Valid Wall) | LE: 19975 (Error)
+        const msb = buffer[offset];
+        const lsb = buffer[offset + 1];
+        const distance = (msb << 8) | lsb;
+
+        const angle = (-HFOV / 2) + (i * STEP);
+
+        if (distance >= 16000 || distance > 10000) {
+             points.push({ angle, distance: 0, intensity: 0 });
+        } else {
+             points.push({ angle, distance, intensity: 0 });
+        }
+    }
+
+    // console.log(`[2D] Scanned ${points.filter(p=>p.distance>0).length}/${POINTS_COUNT} valid points.`);
+    this.emit('2dData', points);
+
+    // 7. Advance Buffer
+    this.serialData = this.serialData.substring(HEX_LEN);
   }
 
   // ==================== Packet Processing ====================
@@ -491,18 +473,19 @@ export class CygLidarD1 extends EventEmitter {
     const numPoints = PROTOCOL.IMAGE_WIDTH; // 160
     const startAngle = -60; // -60 degrees
 
-    // Data starts at byte 6, format: [distance_LSB, distance_MSB, intensity] per point
+    // 2D data format: 3 bytes per point (FROM lidar-scanner.ts line 84-101)
+    // Each point: [distance_LSB, distance_MSB, intensity]
+    // Payload: 6 (header) + 480 (160 points * 3 bytes) + checksum
     for (let i = 0; i < numPoints; i++) {
-      const offset = 6 + (i * 3);
+      const offset = 6 + (i * 3);  // 3 bytes per point!
       if (offset + 2 >= packet.length) break;
 
-      const distanceLSB = packet[offset];
-      const distanceMSB = packet[offset + 1];
-      const distance = (distanceMSB << 8) | distanceLSB;
+      // Read as Little Endian uint16 (lidar-scanner.ts line 86)
+      const distance = packet.readUInt16LE(offset);
       const intensity = packet[offset + 2];
 
-      // Skip error codes
-      if (distance >= PROTOCOL.INVALID_DATA_2D) {
+      // Skip error codes (lidar-scanner.ts line 92-95)
+      if (distance >= 16000 && distance <= 16004) {
         continue;
       }
 

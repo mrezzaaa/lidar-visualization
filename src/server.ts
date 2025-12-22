@@ -270,22 +270,40 @@ export class Server {
 
     this.lidar.on('2dData', (points: LidarPoint2D[]) => {
       if (ws.readyState === WebSocket.OPEN) {
-        // Convert 2D polar coordinates to Cartesian for visualization
-        const cartesianPoints = points.map(p => {
-          const angleRad = (p.angle * Math.PI) / 180;
-          const distanceMeters = p.distance / 1000; // mm to meters
+        // Convert to Three.js coordinates (X-Z horizontal plane, Y=0)
+        const cartesianPoints = points.map((p, i) => {
+          if (p.distance === 0) {
+            return { x: 0, y: 0, z: 0 };
+          }
+
+          // Buffer index reversal (SDK Topic2D.cpp line 16)
+          const bufferIndex = points.length - 1 - i;
+          const point = points[bufferIndex];
+          
+          if (point.distance === 0) {
+            return { x: 0, y: 0, z: 0 };
+          }
+
+          // Angle calculation (SDK Topic2D.cpp lines 20-21)
+          const angleVariable = i * 0.75;
+          const angleRad = ((-60 + angleVariable) * Math.PI) / 180;
+
+          // Three.js coordinate system for HORIZONTAL 2D scan:
+          // X = left/right (sin for horizontal spread)
+          // Y = up/down (0 for 2D scan)
+          // Z = forward/depth (cos for depth)
+          const distanceMeters = point.distance / 1000;
+          
           return {
-            x: distanceMeters * Math.cos(angleRad),
-            y: distanceMeters * Math.sin(angleRad),
-            z: 0,
-            intensity: p.intensity
+            x: Math.sin(angleRad) * distanceMeters,  // Left-right
+            y: 0,                                      // Height = 0 for 2D
+            z: Math.cos(angleRad) * distanceMeters   // Forward depth
           };
         });
 
         ws.send(JSON.stringify({ 
-          type: 'points', 
-          mode: '2D',
-          points: cartesianPoints 
+          type: 'scan2d', 
+          points: cartesianPoints
         }));
       }
     });

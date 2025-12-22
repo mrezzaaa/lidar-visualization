@@ -477,6 +477,13 @@
                     updateDeviceInfo(data.info);
                     break;
 
+                case 'scan2d':
+                    // Coordinates now pre-computed by server (like lidar.ts)
+                    if (data.points && data.points.length > 0) {
+                        updatePoints(data.points);
+                    }
+                    break;
+
                 case 'points':
                     updatePoints(data.points);
                     break;
