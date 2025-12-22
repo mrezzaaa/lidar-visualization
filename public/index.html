@@ -76,7 +76,8 @@
         <label>Mode</label>
         <select id="scanMode">
             <option value="2D">2D Scan</option>
-            <option value="3D">3D Scan (Exp)</option>
+            <option value="3D">3D Scan</option>
+            <option value="Dual">Dual Mode</option>
         </select>
         <div class="grid grid-cols-2 gap-2 mt-2">
             <button class="btn btn-primary" onclick="startScan()">Start</button>
@@ -129,13 +130,93 @@
 <div id="fpsCounter">FPS: 0</div>
 <div id="tooltip" class="absolute hidden bg-black bg-opacity-80 text-white text-xs px-2 py-1 rounded pointer-events-none border border-green-400" style="z-index: 1000;"></div>
 
+<script src="3d_constants.js"></script>
 <script>
+    // --- 3D MATH TABLES ---
+    const tablex = new Float32Array(160 * 60);
+    const tabley = new Float32Array(160 * 60);
+    const tablez = new Float32Array(160 * 60);
+
+    // Initial Distortion Calculation (Ported from lidar.ts)
+    function initDistortion3D() {
+        const width = 160;
+        const height = 60;
+        const _sensor_point_size_mm = 0.02; // PIXEL_REAL_SIZE from CYG_Constant.h line 37
+        const _center_point_offset_x = 0.0; // OFFSET_CENTER_POINT_X from CYG_Constant.h line 38
+        const _center_point_offset_y = 0.0; // OFFSET_CENTER_POINT_Y from CYG_Constant.h line 39
+        const row0 = 1 - (height / 2) + _center_point_offset_x;
+        const col0 = 1 - (width / 2) + _center_point_offset_y;
+
+        function getAngle(x, y) {
+            let radius = _sensor_point_size_mm * Math.sqrt((x * x) + (y * y));
+            let alfaGrad = 0;
+            for (let i = 1; i < lidarAngleCamera.length; i++) {
+                if (radius >= lidarRealImageSize[i - 1] && radius <= lidarRealImageSize[i]) {
+                    // Map range
+                    const in_min = lidarRealImageSize[i - 1]; 
+                    const in_max = lidarRealImageSize[i];
+                    const out_min = lidarAngleCamera[i - 1];
+                    const out_max = lidarAngleCamera[i];
+                    alfaGrad = (radius - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+                    break;
+                }
+            }
+            return alfaGrad;
+        }
+
+        for (let y = 0, r = row0; y < 60; r++, y++) {
+            for (let x = 0, c = col0; x < 160; c++, x++) {
+                const column = c - 0.5;
+                const row    = r - 0.5;
+                const angle_grad = getAngle(column, row);
+                const angle_rad = angle_grad * (Math.PI / 180);
+
+                const hyp_sq = (column * column) + (row * row);
+                const hyp = Math.sqrt(hyp_sq);
+                const sin_angle = Math.sin(angle_rad);
+                
+                // NO scaling - pure trig as per official implementation
+                const x_val = column * (sin_angle / hyp);
+                const y_val = row    * (sin_angle / hyp);
+                const z_val = Math.cos(angle_rad);
+
+                const exactIdx = x + (y * 160);
+                tablex[exactIdx] = x_val;
+                tabley[exactIdx] = y_val;
+                tablez[exactIdx] = z_val;
+            }
+        }
+        
+        // Debug: Check for NaN/Infinity
+        let nanCount = 0, infCount = 0;
+        for (let i = 0; i < 9600; i++) {
+            if (isNaN(tablex[i]) || isNaN(tabley[i]) || isNaN(tablez[i])) nanCount++;
+            if (!isFinite(tablex[i]) || !isFinite(tabley[i]) || !isFinite(tablez[i])) infCount++;
+        }
+        console.log(`3D Tables: ${nanCount} NaN, ${infCount} Inf values`);
+        console.log(`Corner[0]: x=${tablex[0].toFixed(4)}, y=${tabley[0].toFixed(4)}, z=${tablez[0].toFixed(4)}`);
+        console.log(`Center[4800]: x=${tablex[4800].toFixed(4)}, y=${tabley[4800].toFixed(4)}, z=${tablez[4800].toFixed(4)}`);
+    }
+    initDistortion3D();
+
     // --- THREE.JS SETUP ---
     const container = document.getElementById('canvas-container');
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0a0a);
-    const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 100);
-    camera.position.set(0, 5, 5); 
+    
+    // Use OrthographicCamera to avoid perspective distortion
+    const aspect = container.clientWidth / container.clientHeight;
+    const frustumSize = 10;
+    const camera = new THREE.OrthographicCamera(
+        frustumSize * aspect / -2,  // left
+        frustumSize * aspect / 2,   // right
+        frustumSize / 2,            // top
+        frustumSize / -2,           // bottom
+        0.1,                        // near
+        100                         // far
+    );
+    camera.position.set(0, 10, 0);  // Top-down view
+    camera.lookAt(0, 0, 0); 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(container.clientWidth, container.clientHeight);
     container.appendChild(renderer.domElement);
@@ -195,6 +276,29 @@
     globalMap.frustumCulled = false;
     scene.add(globalMap);
     let mapIndex = 0;
+
+    // 2b. 3D Cloud
+    const POINTS_3D = 9600; // 160 * 60
+    const geo3D = new THREE.BufferGeometry();
+    const pos3D = new Float32Array(POINTS_3D * 3);
+    const col3D = new Float32Array(POINTS_3D * 3);
+    geo3D.setAttribute('position', new THREE.BufferAttribute(pos3D, 3));
+    geo3D.setAttribute('color', new THREE.BufferAttribute(col3D, 3));
+    const mat3D = new THREE.PointsMaterial({ 
+        size: 0.02,  // Smaller, more precise points
+        vertexColors: true,
+        sizeAttenuation: true,  // Points get smaller with distance
+        transparent: true,
+        opacity: 0.9
+    });
+    const cloud3D = new THREE.Points(geo3D, mat3D);
+    cloud3D.frustumCulled = false;
+    scene.add(cloud);
+    scene.add(cloud3D);
+    
+    // Clean scene - only axes for reference
+    const axesHelper = new THREE.AxesHelper(2);
+    scene.add(axesHelper);
 
     // 3. Robot Pose
     const robotGroup = new THREE.Group();
@@ -329,9 +433,11 @@
     setInterval(() => { document.getElementById('fpsCounter').innerText = `FPS: ${frames}`; frames = 0; }, 1000);
 
     // COMMANDS (from config.ts)
+    // COMMANDS (from config.ts)
     const CMD = {
         scan2D: new Uint8Array([0x5a, 0x77, 0xff, 0x02, 0x00, 0x01, 0x00, 0x03]),
         scan3D: new Uint8Array([0x5a, 0x77, 0xff, 0x02, 0x00, 0x08, 0x00, 0x0A]),
+        scanDual: new Uint8Array([0x5a, 0x77, 0xff, 0x02, 0x00, 0x07, 0x00, 0x05]),
         stop:   new Uint8Array([0x5a, 0x77, 0xff, 0x02, 0x00, 0x02, 0x00, 0x00]),
         info:   new Uint8Array([0x5A, 0x77, 0xFF, 0x02, 0x00, 0x10, 0x00, 0x12]),
         // Fixed payloads from legacy backend
@@ -369,7 +475,8 @@
     async function startScan() {
         const mode = document.getElementById('scanMode').value;
         if (mode === '2D') await sendCommand(CMD.scan2D);
-        else await sendCommand(CMD.scan3D);
+        else if (mode === '3D') await sendCommand(CMD.scan3D);
+        else await sendCommand(CMD.scanDual);
     }
     async function stopScan() { await sendCommand(CMD.stop); }
     async function getDeviceInfo() { await sendCommand(CMD.info); }
@@ -410,96 +517,191 @@
     // const HEAD = [0x5A, 0x77, 0xFF]; // Removed duplicate
 
     // --- LIDAR.TS STYLE PARSER (Replica) ---
-    // 1. Search for specific command headers (2D or Info)
-    // 2. Ignore Checksum (lidar.ts does not validate RX checksum)
-    // 3. Parse directly
-    
-    // Headers as byte arrays
-    const HEADER_2D = [0x5A, 0x77, 0xFF, 0x43, 0x01, 0x01];
-    const HEADER_INFO = [0x5A, 0x77, 0xFF, 0x07, 0x00, 0x10];
-
     function processBuffer() {
-        // Prevent infinite growth
         if (serialBuffer.length > 500000) {
             serialBuffer = serialBuffer.slice(serialBuffer.length - 100000);
         }
 
-        while (serialBuffer.length >= 13) { // Min size for Info (13) or 2D (329)
-            
-            // Search for headers linear scan
-            // For 3M baud, efficient searching is key.
-            let idx2D = -1;
-            let idxInfo = -1;
-            let bestIdx = -1;
-            let type = "";
-
-            // Find first occurrence of 0x5A
-            for(let i=0; i<serialBuffer.length - 6; i++) {
-                if (serialBuffer[i] !== 0x5A) continue;
-                
-                // Check 2D
-                if (serialBuffer[i+1] === 0x77 && serialBuffer[i+2] === 0xFF && 
-                    serialBuffer[i+3] === 0x43 && serialBuffer[i+4] === 0x01 && serialBuffer[i+5] === 0x01) {
-                    idx2D = i;
-                }
-                
-                // Check Info
-                if (serialBuffer[i+1] === 0x77 && serialBuffer[i+2] === 0xFF && 
-                    serialBuffer[i+3] === 0x07 && serialBuffer[i+4] === 0x00 && serialBuffer[i+5] === 0x10) {
-                    idxInfo = i;
-                }
-
-                if (idx2D !== -1 || idxInfo !== -1) {
-                    break; // Found one
-                }
+        while (serialBuffer.length >= 6) { 
+            // 1. Search for Generic Header 5A 77 FF
+            let headIdx = -1;
+            for(let i=0; i < serialBuffer.length - 5; i++) {
+                 if (serialBuffer[i] === 0x5A && serialBuffer[i+1] === 0x77 && serialBuffer[i+2] === 0xFF) {
+                     headIdx = i;
+                     break;
+                 }
             }
 
-            if (idx2D === -1 && idxInfo === -1) {
-                // Keep last overlapping bytes
-                if (serialBuffer.length > 100) serialBuffer = serialBuffer.slice(serialBuffer.length - 20);
-                return;
-            }
-
-            // Determine priority (first found)
-             if (idx2D !== -1 && idxInfo !== -1) {
-                bestIdx = Math.min(idx2D, idxInfo);
-                type = (bestIdx === idx2D) ? "2D" : "INFO";
-            } else if (idx2D !== -1) {
-                bestIdx = idx2D;
-                type = "2D";
-            } else {
-                bestIdx = idxInfo;
-                type = "INFO";
+            if (headIdx === -1) {
+                 if (serialBuffer.length > 20) serialBuffer = serialBuffer.slice(serialBuffer.length - 10);
+                 return;
             }
 
             // Align
-            if (bestIdx > 0) {
-                serialBuffer = serialBuffer.slice(bestIdx);
+            if (headIdx > 0) {
+                serialBuffer = serialBuffer.slice(headIdx);
+                // Loop will retry from 0
+                continue;
             }
 
-            // Parse
-            if (type === "2D") {
-                // Fixed size 329 bytes
-                if (serialBuffer.length < 329) return;
-                
-                const packet = serialBuffer.slice(0, 329);
-                parse2D(packet, 323); // Payload len fixed
+            // 2. Read Length (Bytes 3, 4)
+            const lenLSB = serialBuffer[3];
+            const lenMSB = serialBuffer[4];
+            const payloadLen = (lenMSB << 8) | lenLSB; 
+            const packetLen = 6 + payloadLen; // Header(6) + Payload
+
+            if (serialBuffer.length < packetLen) return; // Wait for data
+
+            // 3. Extract Type (Byte 5)
+            const type = serialBuffer[5];
+            const packet = serialBuffer.slice(0, packetLen);
+            
+            // Checksum (Optional, but good for validation)
+            let calcCS = 0;
+            for(let i=3; i<packetLen-1; i++) calcCS ^= packet[i];
+            const recvCS = packet[packetLen-1];
+            
+            // Allow checksum mismatch for now if it's data data
+            // (Based on user exp, checksum is finicky, let's trust Header + Length)
+            
+            if (type === 0x01) { // 2D (Standard or Dual)
+                parse2D(packet, payloadLen);
                 frames++;
-                
-                serialBuffer = serialBuffer.slice(329);
-            } else {
-                // Info size 13 bytes
-                if (serialBuffer.length < 13) return;
-                
-                const packet = serialBuffer.slice(0, 13);
+            } else if (type === 0x08) { // 3D
+                parse3D(packet, payloadLen);
+                frames++;
+            } else if (type === 0x10) { // Info
                 parseInfo(packet);
-                
-                serialBuffer = serialBuffer.slice(13);
             }
+
+            serialBuffer = serialBuffer.slice(packetLen);
         }
     }
 
+    function parse3D(pkt, payloadLen) {
+        // Hide 2D, show 3D
+        cloud.visible = false;
+        cloud3D.visible = true;
+        
+        // Payload start: Index 6. Length payloadLen.
+        // Data block starts at Index 6 + 1 (PayloadHeader) = Index 7?
+        // Wait, Reference: Response Packet [5A 77 FF 41 38 08 ...]. 
+        // 08 is Type. Data follows immediately? Or is there a padding?
+        // lidar.ts: offset=3 (loop starts). 
+        // parse3D in lidar.ts: serialdata.replace(header). slice(0, len).
+        // Let's assume Data starts at Byte 6 (after Type).
+        
+        // Data Length: payloadLen - 1 (Type byte) - 1 (Checksum) ? No Checksum is IN packetLen but not PayloadLen? 
+        // Logic: Total = 6 + Payload. CS is at End.
+        // So Payload includes CS?
+        // Packet: [5A 77 FF L L T  (Data...) CS]
+        // PayloadLen = T + Data + CS?
+        // Let's look at 2D. 323. Payload=323. 
+        // Packet = 6 + 323 = 329.
+        // Data = 329 - 6(Head) - 1(Type) - 1(CS) = 321 bytes?
+        // 161 * 2 = 322. Close.
+        
+        // 3D: Payload 14401. 
+        // Data = 14400 bytes? (160*60*1.5 = 14400).
+        // So Data starts at index 6. 
+        
+        const dataStart = 6;
+        const width = 160;
+        const height = 60;
+        
+        const pos = geo3D.attributes.position.array;
+        const col = geo3D.attributes.color.array;
+        
+        let pixelIdx = 0;
+        
+        for (let bytePos = 0; bytePos < width * height * 1.5; bytePos += 3) {
+            const off = dataStart + bytePos;
+            if (off + 3 > pkt.length) break;
+
+            const b1 = pkt[off];
+            const b2 = pkt[off+1];
+            const b3 = pkt[off+2];
+
+            // 12-bit Unpacking
+            // P1 = b1 (8) + b2_high (4)
+            // P2 = b2_low (4) + b3 (8)
+            
+            const val1 = (b1 << 4) | (b2 >> 4);
+            const val2 = ((b2 & 0x0F) << 8) | b3;
+
+            // Process P1 - pixel at pixelIdx
+            setPoint3D(pixelIdx, val1, pos, col);
+            pixelIdx++;
+            
+            // Process P2 - pixel at pixelIdx  
+            setPoint3D(pixelIdx, val2, pos, col);
+            pixelIdx++;
+        }
+        
+        geo3D.attributes.position.needsUpdate = true;
+        geo3D.attributes.color.needsUpdate = true;
+        geo3D.computeBoundingSphere();
+        
+        // Debug: Count valid vs error points
+        let validCount = 0, errorCount = 0, totalDist = 0;
+        for (let i = 0; i < 9600; i++) {
+            if (pos[i*3] !== 0 || pos[i*3+1] !== 0 || pos[i*3+2] !== 0) {
+                validCount++;
+                totalDist += Math.sqrt(pos[i*3]**2 + pos[i*3+1]**2 + pos[i*3+2]**2);
+            } else {
+                errorCount++;
+            }
+        }
+        console.log(`Valid: ${validCount}, Errors: ${errorCount}, Avg dist: ${(totalDist/validCount).toFixed(2)}m`);
+    }
+
+    function setPoint3D(idx, rawDist, pos, col) {
+        if (idx >= 9600) return;
+        
+        // D1_Const::INVALID_DATA_3D = 4080 and above are error codes
+        if (rawDist >= 4080) {
+            pos[idx*3] = 0; pos[idx*3+1] = 0; pos[idx*3+2] = 0;
+            return;
+        }
+
+        // transformPixel - exactly like CYG_Distortion.cpp line 71-73
+        const x = rawDist * tablex[idx];  // mm
+        const y = rawDist * tabley[idx];  // mm
+        const z = rawDist * tablez[idx];  // mm
+
+        // Direct angular mapping (NO lens distortion correction)
+        // This gives flat rectangular FOV without curved edges
+        const width = 160;
+        const height = 60;
+        const gridRow = Math.floor(idx / width);
+        const gridCol = idx % width;
+        
+        // Calculate angles from pixel position
+        const HFOV = 120; // degrees
+        const VFOV = 65;  // degrees
+        const horizontalAngle = ((gridCol / width) - 0.5) * HFOV * (Math.PI / 180);
+        const verticalAngle = ((gridRow / height) - 0.5) * VFOV * (Math.PI / 180);
+        
+        // Spherical to Cartesian (simplified - no lens correction)
+        const distance_m = rawDist * 0.001;
+        const x_direct = distance_m * Math.sin(horizontalAngle);
+        const y_direct = distance_m * Math.sin(verticalAngle);
+        const z_direct = distance_m * Math.cos(horizontalAngle) * Math.cos(verticalAngle);
+        
+        pos[idx*3]     =  x_direct;
+        pos[idx*3+1]   = -y_direct;
+        pos[idx*3+2]   = -z_direct;
+
+        // Color heatmap (DISTANCE_MAX_VALUE_3D = 3000mm)
+        const hue = (1.0 - Math.min(rawDist/3000, 1)) * 0.7;
+        const c = new THREE.Color().setHSL(hue, 1, 0.5);
+        col[idx*3] = c.r; col[idx*3+1] = c.g; col[idx*3+2] = c.b;
+    }
+
     function parse2D(pkt, payloadLen) {
+        // Show 2D, hide 3D
+        cloud.visible = true;
+        cloud3D.visible = false;
         const dataLen = payloadLen - 1;
         const numPoints = Math.floor(dataLen / 2); 
 
