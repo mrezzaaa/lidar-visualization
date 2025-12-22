@@ -99,6 +99,9 @@ class CygLidarD1 extends events_1.EventEmitter {
                 dataBits: 8,
                 stopBits: 1,
                 parity: 'none',
+                // Optimize for high-speed (3M baud) reception on macOS
+                highWaterMark: 1048576,
+                autoOpen: true,
             });
             return new Promise((resolve, reject) => {
                 this.port.on('open', () => {

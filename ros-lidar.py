@@ -25,8 +25,8 @@ from geometry_msgs.msg import Point32
 
 
 ser = serial.Serial(
-    port='/dev/cu.usbserial-120',
-    baudrate=115200,
+    port='/dev/tty.usbserial-A5069RR4',
+    baudrate=3000000,
     parity=serial.PARITY_NONE,
     stopbits=serial.STOPBITS_ONE,
     bytesize=serial.EIGHTBITS

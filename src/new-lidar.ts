@@ -107,11 +107,13 @@ export class CygLidarD1 extends EventEmitter {
       this.currentBaudrate = baudrate;
 
       this.port = new SerialPort({
-        path: portPath,
+        path: "/dev/cu.usbserial-A5069RR4", //portPath,
         baudRate: baudrate,
         dataBits: 8,
         stopBits: 1,
         parity: 'none',
+        // Optimize for high-speed (3M baud) reception on macOS
+        highWaterMark: 1048576,  // 1MB buffer instead of default 64KB
       });
 
       return new Promise((resolve, reject) => {
