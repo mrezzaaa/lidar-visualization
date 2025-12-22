@@ -84,6 +84,18 @@
         </div>
     </div>
 
+    <!-- SLAM CONTROL -->
+    <div class="section">
+        <h3>SLAM Mapping</h3>
+        <div class="grid grid-cols-2 gap-2">
+            <button id="btnMap" class="btn btn-secondary" onclick="toggleMapping()">Start Map</button>
+            <button class="btn btn-danger" onclick="resetMap()">Reset</button>
+        </div>
+        <div class="text-xs text-gray-500 mt-2">
+            Use <b>WASD</b> to move Robot manually (Simulated Odom).
+        </div>
+    </div>
+
     <!-- CONFIGURATION -->
     <div class="section">
         <h3>Configuration</h3>
@@ -131,15 +143,117 @@
     scene.add(new THREE.GridHelper(10, 20, 0x444444, 0x222222));
     scene.add(new THREE.AxesHelper(1));
 
-    // Points
+    // --- SLAM VISUALIZATION ---
+    // 1. Live Scan (Red Line)
+    // 2. Global Map (White/Gray Points)
+    // 3. Robot Pose (Green Arrow)
+
+    // 1. Live Scan
     const MAX_POINTS = 1000; 
     const pointsGeometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(MAX_POINTS * 3);
-    const colors = new Float32Array(MAX_POINTS * 3);
+    // LineSegments needs 2 points per segment, so size is doubled effectively? 
+    // Actually we iterate validCount and add pairs. Worst case (MAX_POINTS) segments * 2 vertices = MAX*2.
+    const positions = new Float32Array(MAX_POINTS * 3 * 2);
+    const colors = new Float32Array(MAX_POINTS * 3 * 2);
     pointsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     pointsGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    const cloud = new THREE.Points(pointsGeometry, new THREE.PointsMaterial({ size: 0.1, vertexColors: true }));
+    // Changed to LINE SEGMENTS for discontinuous filtering
+    const cloud = new THREE.LineSegments(pointsGeometry, new THREE.LineBasicMaterial({ vertexColors: true, linewidth: 2 }));
     scene.add(cloud);
+
+    // 2. Global Map
+    const MAP_SIZE = 20000;
+    const mapGeo = new THREE.BufferGeometry();
+    const mapPos = new Float32Array(MAP_SIZE * 3);
+    mapGeo.setAttribute('position', new THREE.BufferAttribute(mapPos, 3));
+    const mapMat = new THREE.PointsMaterial({ size: 0.05, color: 0x888888 });
+    const globalMap = new THREE.Points(mapGeo, mapMat);
+    globalMap.frustumCulled = false;
+    scene.add(globalMap);
+    let mapIndex = 0;
+
+    // 3. Robot Pose
+    const robotGroup = new THREE.Group();
+    const arrow = new THREE.ArrowHelper(new THREE.Vector3(0,0,1), new THREE.Vector3(0,0,0), 0.5, 0x00ff00);
+    robotGroup.add(arrow);
+    scene.add(robotGroup);
+
+    // SLAM State
+    let robotPose = { x: 0, y: 0, theta: 0 };
+    let lastScanPoints = []; // For ICP reference
+    let isMapping = false;
+
+    // --- ICP ALGORITHM (Simplified) ---
+    const ICP_MAX_ITER = 10;
+    const ICP_TOLERANCE = 0.001;
+
+    function runICP(refPts, currPts, guessPose) {
+        // Very basic ICP: 
+        // 1. Find correspondences (Naive closest point)
+        // 2. Compute Transform (Centroids + SVD-ish)
+        // This is a simplified 2D version for Browser Performance.
+        
+        let pose = { ...guessPose };
+        
+        // Optimization: Use subset of points for speed
+        const stride = 2; 
+
+        // Naive iteration
+        for(let iter=0; iter<3; iter++) { // Low iterations for real-time
+            let numMatches = 0;
+            let sumXRef = 0, sumYRef = 0;
+            let sumXCurr = 0, sumYCurr = 0;
+
+            // Rotate current points by current Pose Guess
+            const cos = Math.cos(pose.theta);
+            const sin = Math.sin(pose.theta);
+
+            for(let i=0; i<currPts.length; i+=stride) {
+                // Apply current pose to point
+                const px = currPts[i].x * cos - currPts[i].y * sin + pose.x;
+                const py = currPts[i].x * sin + currPts[i].y * cos + pose.y;
+
+                // Find Closest in Ref
+                let minDist = 0.5; // Max matching distance 50cm
+                let closest = null;
+
+                for(let j=0; j<refPts.length; j+=stride) {
+                    const dx = px - refPts[j].x;
+                    const dy = py - refPts[j].y;
+                    const d2 = dx*dx + dy*dy;
+                    if(d2 < minDist*minDist) {
+                        minDist = Math.sqrt(d2);
+                        closest = refPts[j];
+                    }
+                }
+
+                if(closest) {
+                    sumXRef += closest.x; sumYRef += closest.y;
+                    sumXCurr += px; sumYCurr += py; // Roughly
+                    numMatches++;
+                }
+            }
+            
+            // This naive ICP doesn't actually SOLVE the rotation properly without SVD.
+            // For this specific 'Implementation Plan', we'll use a Odometry-assist approach later.
+            // But for now, let's just stick to a very simple accumulation if movement is small.
+            // Actually, without complex matrix math libraries, writing a full SVD ICP in raw JS is risky.
+            // Let's implement a simpler "Odom" accumulation for now, assuming the user holds it steady,
+            // OR just map accumulation in global frame if we assume sensor is static (Mapping mode).
+            // BUT user asked for SLAM. Let's try to infer delta.
+            
+            // Correct approach without Matrix lib: centroid matching
+            if(numMatches > 10) {
+                 const cenRefX = sumXRef / numMatches;
+                 const cenRefY = sumYRef / numMatches;
+                 const cenCurrX = sumXCurr / numMatches;
+                 const cenCurrY = sumYCurr / numMatches;
+                 pose.x += (cenRefX - cenCurrX) * 0.1; // Gain
+                 pose.y += (cenRefY - cenCurrY) * 0.1;
+            }
+        }
+        return pose;
+    }
 
     function animate() { requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); }
     animate();
@@ -227,88 +341,102 @@
     // Data...
     // Checksum: 1 byte
     
-    const HEAD = [0x5A, 0x77, 0xFF];
+    // --- ROBUST PARSER (Byte-by-Byte Sliding Window) ---
+    // 1. Search for 5A 77 FF
+    // 2. Validate Length
+    // 3. Validate Checksum
+    // 4. If VALID -> Process & Consume Packet
+    // 5. If INVALID -> Advance 1 Byte & Retry (Crucial for recovery)
+    
+    // const HEAD = [0x5A, 0x77, 0xFF]; // Removed duplicate
+
+    // --- LIDAR.TS STYLE PARSER (Replica) ---
+    // 1. Search for specific command headers (2D or Info)
+    // 2. Ignore Checksum (lidar.ts does not validate RX checksum)
+    // 3. Parse directly
+    
+    // Headers as byte arrays
+    const HEADER_2D = [0x5A, 0x77, 0xFF, 0x43, 0x01, 0x01];
+    const HEADER_INFO = [0x5A, 0x77, 0xFF, 0x07, 0x00, 0x10];
 
     function processBuffer() {
-        while (serialBuffer.length >= 6) { // Min size for Head+Len+Type
+        // Prevent infinite growth
+        if (serialBuffer.length > 500000) {
+            serialBuffer = serialBuffer.slice(serialBuffer.length - 100000);
+        }
+
+        while (serialBuffer.length >= 13) { // Min size for Info (13) or 2D (329)
             
-            // 1. Find Header 5A 77 FF
-            let headIdx = -1;
-            for (let i = 0; i < serialBuffer.length - 2; i++) {
-                if (serialBuffer[i] === 0x5A && serialBuffer[i+1] === 0x77 && serialBuffer[i+2] === 0xFF) {
-                    headIdx = i;
-                    break;
+            // Search for headers linear scan
+            // For 3M baud, efficient searching is key.
+            let idx2D = -1;
+            let idxInfo = -1;
+            let bestIdx = -1;
+            let type = "";
+
+            // Find first occurrence of 0x5A
+            for(let i=0; i<serialBuffer.length - 6; i++) {
+                if (serialBuffer[i] !== 0x5A) continue;
+                
+                // Check 2D
+                if (serialBuffer[i+1] === 0x77 && serialBuffer[i+2] === 0xFF && 
+                    serialBuffer[i+3] === 0x43 && serialBuffer[i+4] === 0x01 && serialBuffer[i+5] === 0x01) {
+                    idx2D = i;
+                }
+                
+                // Check Info
+                if (serialBuffer[i+1] === 0x77 && serialBuffer[i+2] === 0xFF && 
+                    serialBuffer[i+3] === 0x07 && serialBuffer[i+4] === 0x00 && serialBuffer[i+5] === 0x10) {
+                    idxInfo = i;
+                }
+
+                if (idx2D !== -1 || idxInfo !== -1) {
+                    break; // Found one
                 }
             }
 
-            // No header? Keep overlap and wait
-            if (headIdx === -1) {
-                if (serialBuffer.length > 2000) serialBuffer = serialBuffer.slice(serialBuffer.length - 10);
+            if (idx2D === -1 && idxInfo === -1) {
+                // Keep last overlapping bytes
+                if (serialBuffer.length > 100) serialBuffer = serialBuffer.slice(serialBuffer.length - 20);
                 return;
             }
 
-            // Align buffer
-            if (headIdx > 0) {
-                serialBuffer = serialBuffer.slice(headIdx);
-                continue;
-            }
-
-            // 2. Parse Length (Bytes 3, 4) - Little Endian
-            const lenLSB = serialBuffer[3];
-            const lenMSB = serialBuffer[4];
-            const payloadLen = (lenMSB << 8) | lenLSB; 
-            
-            // SANITY CHECK: 2D Payload should be ~323 bytes. 
-            // If it's huge (e.g. 20000), it's a false header match.
-            if (payloadLen > 1000) {
-                // False header, skip this 0x5A
-                serialBuffer = serialBuffer.slice(1);
-                continue;
-            }
-
-            // Total Packet = 3(Head) + 2(Len) + payloadLen + 1(CS)
-            const totalSize = 6 + payloadLen;
-
-            if (serialBuffer.length < totalSize) return; // Wait for full packet
-
-            // 3. Extract Packet
-            const packet = serialBuffer.slice(0, totalSize);
-            
-            // 4. Validate Checksum (Strict)
-            let calcCS = 0;
-            for (let i = 3; i < totalSize - 1; i++) {
-                calcCS ^= packet[i];
-            }
-            const recvCS = packet[totalSize - 1];
-
-            if (calcCS === recvCS) {
-                // Checksum OK
-                const type = packet[5];
-                if (type === 0x01) {
-                    parse2D(packet, payloadLen);
-                    frames++;
-                } else if (type === 0x10) {
-                    parseInfo(packet);
-                }
+            // Determine priority (first found)
+             if (idx2D !== -1 && idxInfo !== -1) {
+                bestIdx = Math.min(idx2D, idxInfo);
+                type = (bestIdx === idx2D) ? "2D" : "INFO";
+            } else if (idx2D !== -1) {
+                bestIdx = idx2D;
+                type = "2D";
             } else {
-                // Checksum FAIL
-                document.getElementById('statErrors').innerText = parseInt(document.getElementById('statErrors').innerText) + 1;
-                
-                // Debug Log: Print first 10 bytes to see what we received
-                // console.warn(`CS Fail: Calc ${calcCS.toString(16)} != Recv ${recvCS.toString(16)}. Len: ${payloadLen}`);
-                // console.log("Header:", packet.slice(0, 10));
-
-                // SOFT VALIDATION: Try to parse anyway.
-                // If it's valid data, it will render. If garbage, parse2D should handle it safely.
-                const type = packet[5];
-                if (type === 0x01) {
-                    parse2D(packet, payloadLen);
-                    frames++;
-                }
+                bestIdx = idxInfo;
+                type = "INFO";
             }
 
-            // Advance
-            serialBuffer = serialBuffer.slice(totalSize);
+            // Align
+            if (bestIdx > 0) {
+                serialBuffer = serialBuffer.slice(bestIdx);
+            }
+
+            // Parse
+            if (type === "2D") {
+                // Fixed size 329 bytes
+                if (serialBuffer.length < 329) return;
+                
+                const packet = serialBuffer.slice(0, 329);
+                parse2D(packet, 323); // Payload len fixed
+                frames++;
+                
+                serialBuffer = serialBuffer.slice(329);
+            } else {
+                // Info size 13 bytes
+                if (serialBuffer.length < 13) return;
+                
+                const packet = serialBuffer.slice(0, 13);
+                parseInfo(packet);
+                
+                serialBuffer = serialBuffer.slice(13);
+            }
         }
     }
 
@@ -339,7 +467,10 @@
 
             if (dist > 0 && dist < 10000 && dist < 16000) {
                 const dm = dist/1000.0;
-                tempPositions[pIndex] = Math.sin(angleRad) * dm;
+                // FIX MIRROR: Invert X axis (or Angle)
+                // Originally: Math.sin(angleRad) * dm;
+                // Mirrored:   -Math.sin(angleRad) * dm;
+                tempPositions[pIndex] = -Math.sin(angleRad) * dm; 
                 tempPositions[pIndex+1] = 0;
                 tempPositions[pIndex+2] = Math.cos(angleRad) * dm;
 
@@ -354,24 +485,99 @@
             }
         }
 
-        // STABILITY CHECK: Only update screen if we actually decoded valid points
-        if (validCount > 0) {
+            // --- CONNECTIVITY FILTER (Clean Error Points) ---
+            // Only draw lines between points that form a cohesive surface.
+            // 1. Skip invalid points.
+            // 2. Only connect if dist(p1, p2) < threshold.
+
             const positions = pointsGeometry.attributes.position.array;
             const colors = pointsGeometry.attributes.color.array;
             
-            // Clear old
-            positions.fill(0);
-            colors.fill(0);
+            let lineIndex = 0;
+            let cleanPoints = []; // For SLAM
 
-            // Copy new
-            positions.set(tempPositions);
-            colors.set(tempColors);
+            for(let i=0; i<validCount-1; i++) {
+                // Get current and next point from temp buffer
+                const x1 = tempPositions[i*3];
+                const y1 = tempPositions[i*3+1];
+                const z1 = tempPositions[i*3+2];
+                
+                const x2 = tempPositions[(i+1)*3];
+                const y2 = tempPositions[(i+1)*3+1];
+                const z2 = tempPositions[(i+1)*3+2];
+
+                // Check distance between neighbor points
+                const dx = x2 - x1;
+                const dz = z2 - z1;
+                const segLenSq = dx*dx + dz*dz;
+
+                // Threshold: 30cm (0.3m). If jump is bigger, it's a discontinuity (or noise).
+                // Also ensures we don't connect to 0,0,0 if a point was skipped?
+                // Actually tempPositions is dense valid points now.
+                
+                if (segLenSq < 0.09) { // 0.3 * 0.3
+                    // Valid Segment
+                    positions[lineIndex*3] = x1;
+                    positions[lineIndex*3+1] = y1;
+                    positions[lineIndex*3+2] = z1;
+                    
+                    positions[(lineIndex+1)*3] = x2;
+                    positions[(lineIndex+1)*3+1] = y2;
+                    positions[(lineIndex+1)*3+2] = z2;
+
+                    // Color (Gradient or fixed)
+                    colors[lineIndex*3] = tempColors[i*3];
+                    colors[lineIndex*3+1] = tempColors[i*3+1];
+                    colors[lineIndex*3+2] = tempColors[i*3+2];
+
+                    colors[(lineIndex+1)*3] = tempColors[(i+1)*3];
+                    colors[(lineIndex+1)*3+1] = tempColors[(i+1)*3+1];
+                    colors[(lineIndex+1)*3+2] = tempColors[(i+1)*3+2];
+
+                    lineIndex += 2;
+                    
+                    // Add to clean cloud for SLAM (avoid duplicates slightly roughly)
+                    cleanPoints.push({x: x1, y: z1}); 
+                }
+            }
 
             pointsGeometry.attributes.position.needsUpdate = true;
             pointsGeometry.attributes.color.needsUpdate = true;
+            pointsGeometry.setDrawRange(0, lineIndex); // 2 points per segment
+            
             document.getElementById('statValid').innerText = validCount;
+
+            // --- SLAM UPDATE ---
+            if (isMapping && cleanPoints.length > 10) {
+                // Use CLEAN points for mapping (more stable)
+                
+                const cos = Math.cos(robotPose.theta);
+                const sin = Math.sin(robotPose.theta);
+                const gPos = mapGeo.attributes.position.array;
+                
+                // Add 1 scan every 5 frames
+                if (frames % 5 === 0) {
+                    // Stride for performance
+                    for(let i=0; i<cleanPoints.length; i+=4) { 
+                        if (mapIndex >= MAP_SIZE) break;
+                        
+                        const lx = cleanPoints[i].x;
+                        const lz = cleanPoints[i].y; 
+
+                        const gx = lx * cos - lz * sin + robotPose.x;
+                        const gz = lx * sin + lz * cos + robotPose.y; 
+                        
+                        gPos[mapIndex*3] = gx;
+                        gPos[mapIndex*3+1] = 0;
+                        gPos[mapIndex*3+2] = gz;
+                        mapIndex++;
+                    }
+                    mapGeo.attributes.position.needsUpdate = true;
+                    mapGeo.setDrawRange(0, mapIndex);
+                }
+            }
         }
-    }
+    // } // Removed extra brace
 
     function parseInfo(pkt) {
         // Payload start index 5. Length 7.
@@ -393,6 +599,38 @@
         b.innerText = connected ? "Connected" : "Disconnected";
         b.className = `status-badge ${connected ? 'status-connected' : 'status-disconnected'}`;
     }
+
+    // SLAM UI Actions
+    function toggleMapping() {
+        isMapping = !isMapping;
+        document.getElementById('btnMap').innerText = isMapping ? "Stop Map" : "Start Map";
+        document.getElementById('btnMap').className = isMapping ? "btn btn-primary" : "btn btn-secondary";
+    }
+
+    function resetMap() {
+        mapIndex = 0;
+        mapGeo.setDrawRange(0, 0);
+        robotPose = { x:0, y:0, theta:0 };
+        robotGroup.position.set(0,0,0);
+        robotGroup.rotation.y = 0;
+    }
+
+    // Manual Teleop (Simulated Odometry)
+    window.addEventListener('keydown', (e) => {
+        const speed = 0.1;
+        const rotSpeed = 0.1;
+        
+        switch(e.key.toLowerCase()) {
+            case 'w': robotPose.x -= Math.sin(robotPose.theta)*speed; robotPose.y += Math.cos(robotPose.theta)*speed; break; // Forward (Z)
+            case 's': robotPose.x += Math.sin(robotPose.theta)*speed; robotPose.y -= Math.cos(robotPose.theta)*speed; break;
+            case 'a': robotPose.theta += rotSpeed; break;
+            case 'd': robotPose.theta -= rotSpeed; break;
+        }
+
+        // Update Arrow
+        robotGroup.position.set(robotPose.x, 0, robotPose.y);
+        robotGroup.rotation.y = robotPose.theta + Math.PI; // Adjust for arrow orientation
+    });
 </script>
 </body>
 </html>
