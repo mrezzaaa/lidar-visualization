@@ -1,634 +1,398 @@
 <!DOCTYPE html>
-<parameter name="html" lang="en">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CygLiDAR D1 Scanner</title>
+    <title>CygLiDAR D1 Direct WebSerial</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <style>
-        html, body {
-            margin: 0;
-            padding: 0;
-            height: 100%;
-            width: 100%;
-            overflow: hidden;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        }
-
-        #lidarCanvas {
-            position: absolute;
-            top: 0;
-            left: 340px;
-            width: calc(100vw - 340px);
-            height: 100vh;
-            background-color: #0a0a0a;
-        }
-
-        .sidebar {
-            position: fixed;
-            left: 0;
-            top: 0;
-            width: 340px;
-            height: 100vh;
+        body { margin: 0; overflow: hidden; background-color: #0a0a0a; color: white; font-family: sans-serif; }
+        #canvas-container { position: absolute; top: 0; left: 320px; width: calc(100% - 320px); height: 100%; }
+        #sidebar {
+            position: absolute; top: 0; left: 0; width: 320px; height: 100%;
             background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
-            color: #fff;
-            padding: 20px;
-            overflow-y: auto;
-            box-shadow: 4px 0 15px rgba(0, 0, 0, 0.5);
-            z-index: 10;
+            padding: 20px; box-sizing: border-box; overflow-y: auto;
+            border-right: 1px solid rgba(255,255,255,0.1);
         }
-
-        .sidebar h1 {
-            font-size: 20px;
-            font-weight: 700;
-            margin-bottom: 20px;
-            color: #4ecca3;
-        }
-
-        .control-section {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 15px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .control-section h3 {
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 10px;
-            color: #93deff;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .control-group {
-            margin-bottom: 12px;
-        }
-
-        .control-group label {
-            display: block;
-            font-size: 12px;
-            margin-bottom: 5px;
-            color: #b0b0b0;
-        }
-
-        select, input[type="number"] {
-            width: 100%;
-            padding: 8px 12px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 4px;
-            color: #fff;
-            font-size: 13px;
-        }
-
-        select:focus, input:focus {
-            outline: none;
-            border-color: #4ecca3;
-        }
-
-        button {
-            width: 100%;
-            padding: 10px 15px;
-            border: none;
-            border-radius: 5px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-
-        .btn-primary {
-            background: #4ecca3;
-            color: #1a1a2e;
-        }
-
-        .btn-primary:hover {
-            background: #3db88c;
-            transform: translateY(-1px);
-        }
-
-        .btn-danger {
-            background: #e84545;
-            color: white;
-        }
-
-        .btn-danger:hover {
-            background: #d63939;
-            transform: translateY(-1px);
-        }
-
-        .btn-secondary {
-            background: rgba(255, 255, 255, 0.15);
-            color: white;
-        }
-
-        .btn-secondary:hover {
-            background: rgba(255, 255, 255, 0.25);
-        }
-
-        .btn-disabled {
-            background: rgba(255, 255, 255, 0.05);
-            color: rgba(255, 255, 255, 0.3);
-            cursor: not-allowed;
-        }
-
-        .status-badge {
-            display: inline-block;
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-size: 11px;
-            font-weight: 600;
-            margin-top: 5px;
-        }
-
-        .status-connected {
-            background: #4ecca3;
-            color: #1a1a2e;
-        }
-
-        .status-disconnected {
-            background: rgba(255, 255, 255, 0.1);
-            color: rgba(255, 255, 255, 0.5);
-        }
-
-        .info-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 6px 0;
-            font-size: 12px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        }
-
-        .info-label {
-            color: #93deff;
-            font-weight: 500;
-        }
-
-        .info-value {
-            color: #fff;
-            font-family: monospace;
-        }
-
-        .pulse-mode-toggle {
-            display: flex;
-            gap: 5px;
-            margin-top: 8px;
-        }
-
-        .pulse-mode-toggle button {
-            flex: 1;
-            padding: 6px;
-            font-size: 11px;
-        }
-
-        .pulse-mode-active {
-            background: #4ecca3 !important;
-            color: #1a1a2e !important;
-        }
-
-        #status-message {
-            position: fixed;
-            bottom: 20px;
-            left: 360px;
-            background: rgba(0, 0, 0, 0.9);
-            color: #4ecca3;
-            padding: 12px 20px;
-            border-radius: 6px;
-            font-size: 13px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-            z-index: 100;
-            display: none;
-        }
-
-        .scan-controls {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-top: 10px;
-        }
+        .btn { width: 100%; padding: 10px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; transition: all 0.2s; margin-top: 5px; }
+        .btn-primary { background: #4ecca3; color: #1a1a2e; }
+        .btn-primary:hover { background: #3db88c; }
+        .btn-danger { background: #e84545; color: white; }
+        .btn-danger:hover { background: #d63939; }
+        .btn-secondary { background: rgba(255,255,255,0.1); color: white; }
+        .btn-secondary:hover { background: rgba(255,255,255,0.2); }
+        
+        .status-badge { display: block; padding: 6px; border-radius: 6px; font-size: 12px; font-weight: bold; text-align: center; margin-top: 10px; }
+        .status-disconnected { background: rgba(255,255,255,0.1); color: #aaa; }
+        .status-connected { background: #4ecca3; color: #1a1a2e; }
+        
+        .section { background: rgba(255,255,255,0.05); padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.05); }
+        .section h3 { font-size: 12px; font-weight: bold; text-transform: uppercase; color: #93deff; margin-bottom: 10px; letter-spacing: 1px; }
+        
+        label { display: block; font-size: 11px; color: #aaa; margin-bottom: 4px; margin-top: 8px; }
+        select, input { width: 100%; padding: 8px; background: rgba(0,0,0,0.3); color: white; border: 1px solid #444; border-radius: 4px; font-size: 13px; }
+        .info-row { display: flex; justify-content: space-between; font-size: 13px; border-bottom: 1px solid rgba(255,255,255,0.1); padding: 5px 0; }
+        .info-row:last-child { border-bottom: none; }
+        .info-label { color: #aaa; }
+        .info-val { font-family: monospace; }
+        
+        #fpsCounter { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.5); padding: 5px 10px; border-radius: 4px; font-family: monospace; pointer-events: none; }
     </style>
 </head>
 <body>
-    <!-- Sidebar Control Panel -->
-    <div class="sidebar">
-        <h1>🛰️ CygLiDAR D1</h1>
 
-        <!-- Connection Section -->
-        <div class="control-section">
-            <h3>Connection</h3>
-            <div class="control-group">
-                <label>Serial Port</label>
-                <select id="port-select">
-                    <option value="">-- Select Port --</option>
-                </select>
-            </div>
-            <div class="control-group">
-                <label>Baudrate</label>
-                <select id="baudrate-select">
-                    <option value="3000000">3,000,000 bps</option>
-                    <option value="921600">921,600 bps</option>
-                    <option value="115200" selected>115,200 bps</option>
-                    <option value="57600">57,600 bps</option>
-                </select>
-            </div>
-            <button id="connect-btn" class="btn-primary">Connect</button>
-            <button id="disconnect-btn" class="btn-danger" style="display:none; margin-top:10px;">Disconnect</button>
-            <div id="connection-status" class="status-badge status-disconnected">Disconnected</div>
-        </div>
+<div id="sidebar">
+    <h1 class="text-xl font-bold mb-6 text-green-400">🛰️ CygLiDAR Direct</h1>
 
-        <!-- Device Info Section -->
-        <div class="control-section" id="device-info-section" style="display:none;">
-            <h3>Device Information</h3>
-            <div class="info-row">
-                <span class="info-label">HW Version:</span>
-                <span class="info-value" id="hw-version">--</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">FW Version:</span>
-                <span class="info-value" id="fw-version">--</span>
-            </div>
-            <div class="info-row" style="border-bottom:none;">
-                <span class="info-label">Serial Number:</span>
-                <span class="info-value" id="serial-number">--</span>
-            </div>
-        </div>
+    <!-- CONNECTION -->
+    <div class="section">
+        <h3>Connection</h3>
+        <label>Baud Rate</label>
+        <select id="baudRate">
+            <option value="3000000" selected>3,000,000 bps</option>
+            <option value="921600">921,600 bps</option>
+            <option value="115200">115,200 bps</option>
+        </select>
+        <button id="btnConnect" class="btn btn-primary" onclick="connectSerial()">Connect</button>
+        <button id="btnDisconnect" class="btn btn-danger hidden" onclick="disconnectSerial()">Disconnect</button>
+        <div id="statusBadge" class="status-badge status-disconnected">Disconnected</div>
+    </div>
 
-        <!-- Configuration Section -->
-        <div class="control-section" id="config-section" style="display:none;">
-            <h3>Configuration</h3>
-            <div class="control-group">
-                <label>Frequency Channel (0-15)</label>
-                <input type="number" id="frequency-input" min="0" max="15" value="0">
-                <button id="set-frequency-btn" class="btn-secondary" style="margin-top:8px;">Set Frequency</button>
-            </div>
-            <div class="control-group" style="margin-top:15px;">
-                <label>Integration Time (μs)</label>
-                <input type="number" id="pulse-input" min="0" max="10000" value="1000">
-                <div class="pulse-mode-toggle">
-                    <button id="pulse-auto-btn" class="btn-secondary pulse-mode-active">Auto</button>
-                    <button id="pulse-manual-btn" class="btn-secondary">Manual</button>
-                </div>
-                <button id="set-pulse-btn" class="btn-secondary" style="margin-top:8px;">Set Pulse</button>
-            </div>
-            <div class="control-group" style="margin-top:15px;">
-                <label>Change Baudrate</label>
-                <select id="new-baudrate-select">
-                    <option value="0">3,000,000 bps</option>
-                    <option value="1">921,600 bps</option>
-                    <option value="2" selected>115,200 bps</option>
-                    <option value="3">57,600 bps</option>
-                </select>
-                <button id="change-baudrate-btn" class="btn-secondary" style="margin-top:8px;">Change Baudrate</button>
-            </div>
-        </div>
+    <!-- DEVICE INFO -->
+    <div class="section">
+        <h3>Device Info</h3>
+        <div class="info-row"><span class="info-label">Model</span> <span class="info-val">CygLiDAR D1</span></div>
+        <div class="info-row"><span class="info-label">Version</span> <span class="info-val" id="infoVer">--.--.--</span></div>
+        <div class="info-row"><span class="info-label">HW</span> <span class="info-val" id="infoHW">--.--.--</span></div>
+        <div class="info-row"><span class="info-label">Serial</span> <span class="info-val" id="infoSerial">--</span></div>
+        <button class="btn btn-secondary" onclick="getDeviceInfo()">Get Info</button>
+    </div>
 
-        <!-- Scan Control Section -->
-        <div class="control-section" id="scan-section" style="display:none;">
-            <h3>Scan Control</h3>
-            <div class="control-group">
-                <label>Scan Mode</label>
-                <select id="scan-mode">
-                    <option value="2D" selected>2D Scan</option>
-                    <option value="3D">3D Scan</option>
-                </select>
-            </div>
-            <div class="scan-controls">
-                <button id="start-scan-btn" class="btn-primary">Start Scan</button>
-                <button id="stop-scan-btn" class="btn-danger">Stop Scan</button>
-            </div>
+    <!-- SCAN CONTROL -->
+    <div class="section">
+        <h3>Scan Control</h3>
+        <label>Mode</label>
+        <select id="scanMode">
+            <option value="2D">2D Scan</option>
+            <option value="3D">3D Scan (Exp)</option>
+        </select>
+        <div class="grid grid-cols-2 gap-2 mt-2">
+            <button class="btn btn-primary" onclick="startScan()">Start</button>
+            <button class="btn btn-danger" onclick="stopScan()">Stop</button>
         </div>
     </div>
 
-    <!-- Fullscreen Canvas -->
-    <div id="lidarCanvas"></div>
+    <!-- CONFIGURATION -->
+    <div class="section">
+        <h3>Configuration</h3>
+        <label>Frequency Channel (0-15)</label>
+        <div class="flex gap-2">
+            <input type="number" id="freqInput" value="0" min="0" max="15">
+            <button class="btn btn-secondary w-auto" onclick="setFrequency()">Set</button>
+        </div>
 
-    <!-- Status Message -->
-    <div id="status-message"></div>
+        <label>Pulse Width (μs)</label>
+        <div class="flex gap-2">
+            <input type="number" id="pulseInput" value="1000" step="100">
+            <button class="btn btn-secondary w-auto" onclick="setPulse()">Set</button>
+        </div>
+    </div>
 
-    <script>
-        // ==================== LocalStorage Keys ====================
-        const STORAGE_KEYS = {
-            LAST_PORT: 'cyglidar.lastPort',
-            LAST_BAUDRATE: 'cyglidar.lastBaudrate'
-        };
+    <!-- STATISTICS -->
+    <div class="section">
+        <h3>Statistics</h3>
+        <div class="info-row"><span class="info-label">Points</span> <span class="info-val" id="statPoints">0</span></div>
+        <div class="info-row"><span class="info-label">Valid</span> <span class="info-val text-green-400" id="statValid">0</span></div>
+        <div class="info-row"><span class="info-label">Errors</span> <span class="info-val text-red-400" id="statErrors">0</span></div>
+    </div>
 
-        // ==================== Global Variables ====================
-        const container = document.getElementById('lidarCanvas');
-        let scene, camera, renderer, pointsMesh, lineMesh, controls;
-        let ws;
-        let currentPoints = [];
-        let isConnected = false;
-        let pulseMode = 'auto';
+    <div class="text-xs text-gray-500 text-center mt-4">
+        Zero-Latency Mode • Big Endian
+    </div>
+</div>
 
-        // ==================== Three.js Setup ====================
-        function init() {
-            scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(75, (window.innerWidth - 340) / window.innerHeight, 0.1, 1000);
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth - 340, window.innerHeight);
-            container.appendChild(renderer.domElement);
+<div id="canvas-container"></div>
+<div id="fpsCounter">FPS: 0</div>
 
-            addGrid();
-            addAxes();
+<script>
+    // --- THREE.JS SETUP ---
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0a0a0a);
+    const camera = new THREE.PerspectiveCamera(60, container.clientWidth / container.clientHeight, 0.1, 100);
+    camera.position.set(0, 5, 5); 
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    container.appendChild(renderer.domElement);
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    scene.add(new THREE.GridHelper(10, 20, 0x444444, 0x222222));
+    scene.add(new THREE.AxesHelper(1));
 
-            controls = new THREE.OrbitControls(camera, renderer.domElement);
-            camera.position.set(5, 5, 10);
-            controls.update();
+    // Points
+    const MAX_POINTS = 1000; 
+    const pointsGeometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(MAX_POINTS * 3);
+    const colors = new Float32Array(MAX_POINTS * 3);
+    pointsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    pointsGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const cloud = new THREE.Points(pointsGeometry, new THREE.PointsMaterial({ size: 0.1, vertexColors: true }));
+    scene.add(cloud);
 
-            window.addEventListener('resize', onWindowResize, false);
-            animate();
+    function animate() { requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); }
+    animate();
+    window.addEventListener('resize', () => {
+        camera.aspect = container.clientWidth / container.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(container.clientWidth, container.clientHeight);
+    });
+
+    // --- WEBSERIAL LOGIC ---
+    let port, reader, writer, keepReading = false;
+    let serialBuffer = new Uint8Array(0);
+    let frames = 0;
+    setInterval(() => { document.getElementById('fpsCounter').innerText = `FPS: ${frames}`; frames = 0; }, 1000);
+
+    // COMMANDS (from config.ts)
+    const CMD = {
+        scan2D: new Uint8Array([0x5a, 0x77, 0xff, 0x02, 0x00, 0x01, 0x00, 0x03]),
+        scan3D: new Uint8Array([0x5a, 0x77, 0xff, 0x02, 0x00, 0x08, 0x00, 0x0A]),
+        stop:   new Uint8Array([0x5a, 0x77, 0xff, 0x02, 0x00, 0x02, 0x00, 0x00]),
+        info:   new Uint8Array([0x5A, 0x77, 0xFF, 0x02, 0x00, 0x10, 0x00, 0x12]),
+        // Fixed payloads from legacy backend
+        freq:   new Uint8Array([0x5A, 0x77, 0x03, 0x00, 0x00, 0x00]), 
+        pulse:  new Uint8Array([0x5a, 0x77, 0xff, 0x03, 0x00, 0x0c, 0x10, 0x67, 0x78])
+    };
+
+    async function connectSerial() {
+        if (!navigator.serial) return alert("WebSerial not supported");
+        try {
+            port = await navigator.serial.requestPort();
+            await port.open({ baudRate: parseInt(document.getElementById('baudRate').value) });
+            keepReading = true;
+            updateUI(true);
+            readLoop();
+        } catch (err) { console.error(err); alert("Connection Failed: " + err.message); }
+    }
+
+    async function disconnectSerial() {
+        keepReading = false;
+        if (reader) await reader.cancel();
+        if (port) await port.close();
+        updateUI(false);
+    }
+
+    async function sendCommand(data) {
+        if (!port || !port.writable) return;
+        const writer = port.writable.getWriter();
+        await writer.write(data);
+        writer.releaseLock();
+        console.log("Sent:", data);
+    }
+
+    // UI Actions
+    async function startScan() {
+        const mode = document.getElementById('scanMode').value;
+        if (mode === '2D') await sendCommand(CMD.scan2D);
+        else await sendCommand(CMD.scan3D);
+    }
+    async function stopScan() { await sendCommand(CMD.stop); }
+    async function getDeviceInfo() { await sendCommand(CMD.info); }
+    async function setFrequency() { await sendCommand(CMD.freq); } // Using fixed legacy packet
+    async function setPulse() { await sendCommand(CMD.pulse); }   // Using fixed legacy packet
+
+    async function readLoop() {
+        reader = port.readable.getReader();
+        while (keepReading) {
+            try {
+                const { value, done } = await reader.read();
+                if (done) break;
+                if (value) {
+                    const newBuffer = new Uint8Array(serialBuffer.length + value.length);
+                    newBuffer.set(serialBuffer);
+                    newBuffer.set(value, serialBuffer.length);
+                    serialBuffer = newBuffer;
+                    processBuffer();
+                }
+            } catch (error) { console.error(error); break; }
         }
+    }
 
-        function addGrid() {
-            const size = 20;
-            const divisions = 20;
-            const gridHelper = new THREE.GridHelper(size, divisions, 0x444444, 0x222222);
-            scene.add(gridHelper);
-        }
+    // --- PARSER (Dynamic Protocol per Manual) ---
+    // Header: 5A 77 FF
+    // Length: LSB MSB (2 bytes)
+    // PayloadHeader: 1 byte
+    // Data...
+    // Checksum: 1 byte
+    
+    const HEAD = [0x5A, 0x77, 0xFF];
 
-        function addAxes() {
-            const axesHelper = new THREE.AxesHelper(5);
-            scene.add(axesHelper);
-        }
-
-        function onWindowResize() {
-            renderer.setSize(window.innerWidth - 340, window.innerHeight);
-            camera.aspect = (window.innerWidth - 340) / window.innerHeight;
-            camera.updateProjectionMatrix();
-        }
-
-        function createPointsMesh(points) {
-            if (pointsMesh) scene.remove(pointsMesh);
-            if (points.length === 0) return;
-
-            const geometry = new THREE.BufferGeometry();
-            const vertices = new Float32Array(points.length * 3);
-            const colors = new Float32Array(points.length * 3);
-
-            points.forEach((point, index) => {
-                vertices[index * 3] = point.x;
-                vertices[index * 3 + 1] = point.y;
-                vertices[index * 3 + 2] = point.z || 0;
-
-                // Color based on distance
-                const distance = Math.sqrt(point.x ** 2 + point.y ** 2 + (point.z || 0) ** 2);
-                const hue = (1 - Math.min(distance / 10, 1)) * 0.7; // Green to red
-                const rgb = hslToRgb(hue, 1, 0.5);
-                colors[index * 3] = rgb[0];
-                colors[index * 3 + 1] = rgb[1];
-                colors[index * 3 + 2] = rgb[2];
-            });
-
-            geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-            const material = new THREE.PointsMaterial({ 
-                size: 0.08, 
-                vertexColors: true 
-            });
-            pointsMesh = new THREE.Points(geometry, material);
-            scene.add(pointsMesh);
-        }
-
-        function hslToRgb(h, s, l) {
-            let r, g, b;
-            if (s === 0) {
-                r = g = b = l;
-            } else {
-                const hue2rgb = (p, q, t) => {
-                    if (t < 0) t += 1;
-                    if (t > 1) t -= 1;
-                    if (t < 1/6) return p + (q - p) * 6 * t;
-                    if (t < 1/2) return q;
-                    if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
-                    return p;
-                };
-                const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-                const p = 2 * l - q;
-                r = hue2rgb(p, q, h + 1/3);
-                g = hue2rgb(p, q, h);
-                b = hue2rgb(p, q, h - 1/3);
-            }
-            return [r, g, b];
-        }
-
-        function updatePoints(newPoints) {
-            currentPoints = newPoints;
-            createPointsMesh(currentPoints);
-        }
-
-        function animate() {
-            requestAnimationFrame(animate);
-            controls.update();
-            renderer.render(scene, camera);
-        }
-
-        // ==================== WebSocket Setup ====================
-        function connectWebSocket() {
-            ws = new WebSocket('ws://localhost:3000');
+    function processBuffer() {
+        while (serialBuffer.length >= 6) { // Min size for Head+Len+Type
             
-            ws.onopen = () => {
-                console.log('WebSocket connected');
-                ws.send(JSON.stringify({ command: 'listPorts' }));
-            };
-
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                handleServerMessage(data);
-            };
-
-            ws.onclose = () => {
-                console.log('WebSocket closed, reconnecting...');
-                setTimeout(connectWebSocket, 2000);
-            };
-
-            ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-            };
-        }
-
-        function handleServerMessage(data) {
-            console.log('Received:', data);
-
-            switch (data.type) {
-                case 'ports':
-                    updatePortList(data.ports);
+            // 1. Find Header 5A 77 FF
+            let headIdx = -1;
+            for (let i = 0; i < serialBuffer.length - 2; i++) {
+                if (serialBuffer[i] === 0x5A && serialBuffer[i+1] === 0x77 && serialBuffer[i+2] === 0xFF) {
+                    headIdx = i;
                     break;
-
-                case 'connected':
-                    if (data.success) {
-                        isConnected = true;
-                        updateConnectionUI(true);
-                        showStatus('Connected successfully');
-                    }
-                    break;
-
-                case 'disconnected':
-                    isConnected = false;
-                    updateConnectionUI(false);
-                    showStatus('Disconnected');
-                    break;
-
-                case 'deviceInfo':
-                    updateDeviceInfo(data.info);
-                    break;
-
-                case 'points':
-                    updatePoints(data.points);
-                    break;
-
-                case 'status':
-                    showStatus(data.message);
-                    break;
-
-                case 'error':
-                    showStatus('Error: ' + data.message, true);
-                    break;
+                }
             }
-        }
 
-        // ==================== UI Updates ====================
-        function updatePortList(ports) {
-            const select = document.getElementById('port-select');
-            select.innerHTML = '<option value="">-- Select Port --</option>';
+            // No header? Keep overlap and wait
+            if (headIdx === -1) {
+                if (serialBuffer.length > 2000) serialBuffer = serialBuffer.slice(serialBuffer.length - 10);
+                return;
+            }
+
+            // Align buffer
+            if (headIdx > 0) {
+                serialBuffer = serialBuffer.slice(headIdx);
+                continue;
+            }
+
+            // 2. Parse Length (Bytes 3, 4) - Little Endian
+            const lenLSB = serialBuffer[3];
+            const lenMSB = serialBuffer[4];
+            const payloadLen = (lenMSB << 8) | lenLSB; 
             
-            ports.forEach(port => {
-                const option = document.createElement('option');
-                option.value = port;
-                option.textContent = port;
-                select.appendChild(option);
-            });
-
-            // Restore last port
-            const lastPort = localStorage.getItem(STORAGE_KEYS.LAST_PORT);
-            if (lastPort && ports.includes(lastPort)) {
-                select.value = lastPort;
+            // SANITY CHECK: 2D Payload should be ~323 bytes. 
+            // If it's huge (e.g. 20000), it's a false header match.
+            if (payloadLen > 1000) {
+                // False header, skip this 0x5A
+                serialBuffer = serialBuffer.slice(1);
+                continue;
             }
-        }
 
-        function updateConnectionUI(connected) {
-            const connectBtn = document.getElementById('connect-btn');
-            const disconnectBtn = document.getElementById('disconnect-btn');
-            const statusBadge = document.getElementById('connection-status');
-            const deviceInfo = document.getElementById('device-info-section');
-            const configSection = document.getElementById('config-section');
-            const scanSection = document.getElementById('scan-section');
+            // Total Packet = 3(Head) + 2(Len) + payloadLen + 1(CS)
+            const totalSize = 6 + payloadLen;
 
-            if (connected) {
-                connectBtn.style.display = 'none';
-                disconnectBtn.style.display = 'block';
-                statusBadge.textContent = 'Connected';
-                statusBadge.className = 'status-badge status-connected';
-                deviceInfo.style.display = 'block';
-                configSection.style.display = 'block';
-                scanSection.style.display = 'block';
+            if (serialBuffer.length < totalSize) return; // Wait for full packet
+
+            // 3. Extract Packet
+            const packet = serialBuffer.slice(0, totalSize);
+            
+            // 4. Validate Checksum (Strict)
+            let calcCS = 0;
+            for (let i = 3; i < totalSize - 1; i++) {
+                calcCS ^= packet[i];
+            }
+            const recvCS = packet[totalSize - 1];
+
+            if (calcCS === recvCS) {
+                // Checksum OK
+                const type = packet[5];
+                if (type === 0x01) {
+                    parse2D(packet, payloadLen);
+                    frames++;
+                } else if (type === 0x10) {
+                    parseInfo(packet);
+                }
             } else {
-                connectBtn.style.display = 'block';
-                disconnectBtn.style.display = 'none';
-                statusBadge.textContent = 'Disconnected';
-                statusBadge.className = 'status-badge status-disconnected';
-                deviceInfo.style.display = 'none';
-                configSection.style.display = 'none';
-                scanSection.style.display = 'none';
+                // Checksum FAIL
+                document.getElementById('statErrors').innerText = parseInt(document.getElementById('statErrors').innerText) + 1;
+                
+                // Debug Log: Print first 10 bytes to see what we received
+                // console.warn(`CS Fail: Calc ${calcCS.toString(16)} != Recv ${recvCS.toString(16)}. Len: ${payloadLen}`);
+                // console.log("Header:", packet.slice(0, 10));
+
+                // SOFT VALIDATION: Try to parse anyway.
+                // If it's valid data, it will render. If garbage, parse2D should handle it safely.
+                const type = packet[5];
+                if (type === 0x01) {
+                    parse2D(packet, payloadLen);
+                    frames++;
+                }
+            }
+
+            // Advance
+            serialBuffer = serialBuffer.slice(totalSize);
+        }
+    }
+
+    function parse2D(pkt, payloadLen) {
+        const dataLen = payloadLen - 1;
+        const numPoints = Math.floor(dataLen / 2); 
+
+        // Update Scan Stats
+        document.getElementById('statPoints').innerText = numPoints;
+
+        // Temporary buffers
+        const tempPositions = new Float32Array(MAX_POINTS * 3);
+        const tempColors = new Float32Array(MAX_POINTS * 3);
+        
+        let validCount = 0;
+        let pIndex = 0;
+
+        for(let i=0; i<numPoints; i++) {
+            if (pIndex >= MAX_POINTS*3) break;
+
+            const off = 6 + (i*2);
+            const dist = (pkt[off] << 8) | pkt[off+1]; // Big Endian
+            
+            // Dynamic Angle Step
+            const step = 120.0 / (numPoints - 1 || 1); 
+            const angleDeg = -60 + (i * step);
+            const angleRad = angleDeg * (Math.PI/180);
+
+            if (dist > 0 && dist < 10000 && dist < 16000) {
+                const dm = dist/1000.0;
+                tempPositions[pIndex] = Math.sin(angleRad) * dm;
+                tempPositions[pIndex+1] = 0;
+                tempPositions[pIndex+2] = Math.cos(angleRad) * dm;
+
+                const hue = (1.0 - Math.min(dm/3, 1)) * 0.3;
+                const col = new THREE.Color().setHSL(hue, 1, 0.5);
+                tempColors[pIndex] = col.r;
+                tempColors[pIndex+1] = col.g;
+                tempColors[pIndex+2] = col.b;
+
+                pIndex += 3;
+                validCount++;
             }
         }
 
-        function updateDeviceInfo(info) {
-            document.getElementById('hw-version').textContent = info.hwVersion;
-            document.getElementById('fw-version').textContent = info.fwVersion;
-            document.getElementById('serial-number').textContent = info.serialNumber;
+        // STABILITY CHECK: Only update screen if we actually decoded valid points
+        if (validCount > 0) {
+            const positions = pointsGeometry.attributes.position.array;
+            const colors = pointsGeometry.attributes.color.array;
+            
+            // Clear old
+            positions.fill(0);
+            colors.fill(0);
+
+            // Copy new
+            positions.set(tempPositions);
+            colors.set(tempColors);
+
+            pointsGeometry.attributes.position.needsUpdate = true;
+            pointsGeometry.attributes.color.needsUpdate = true;
+            document.getElementById('statValid').innerText = validCount;
         }
+    }
 
-        function showStatus(message, isError = false) {
-            const statusEl = document.getElementById('status-message');
-            statusEl.textContent = message;
-            statusEl.style.color = isError ? '#e84545' : '#4ecca3';
-            statusEl.style.display = 'block';
-            setTimeout(() => {
-                statusEl.style.display = 'none';
-            }, 3000);
-        }
+    function parseInfo(pkt) {
+        // Payload start index 5. Length 7.
+        // Data format from legacy: Major, Minor, Patch, HW1, HW2, HW3 (Hex strings)
+        // Packet: 5A 77 FF 07 00 10 [Ver 3bytes] [HW 3bytes] CS
+        // Actually legacy parser sliced bytes 6-12 of the string...
+        // Let's just show hex values
+        const ver = `${pkt[6].toString(16)}.${pkt[7].toString(16)}.${pkt[8].toString(16)}`;
+        const hw = `${pkt[9].toString(16)}.${pkt[10].toString(16)}.${pkt[11].toString(16)}`;
+        document.getElementById('infoVer').innerText = ver;
+        document.getElementById('infoHW').innerText = hw;
+        document.getElementById('infoSerial').innerText = "Detected";
+    }
 
-        // ==================== Event Listeners ====================
-        document.getElementById('connect-btn').addEventListener('click', () => {
-            const port = document.getElementById('port-select').value;
-            const baudrate = parseInt(document.getElementById('baudrate-select').value);
-
-            if (!port) {
-                showStatus('Please select a port', true);
-                return;
-            }
-
-            // Save to localStorage
-            localStorage.setItem(STORAGE_KEYS.LAST_PORT, port);
-            localStorage.setItem(STORAGE_KEYS.LAST_BAUDRATE, baudrate.toString());
-
-            ws.send(JSON.stringify({ command: 'connect', port, baudrate }));
-        });
-
-        document.getElementById('disconnect-btn').addEventListener('click', () => {
-            ws.send(JSON.stringify({ command: 'disconnect' }));
-        });
-
-        document.getElementById('set-frequency-btn').addEventListener('click', () => {
-            const channel = parseInt(document.getElementById('frequency-input').value);
-            if (channel < 0 || channel > 15) {
-                showStatus('Frequency must be 0-15', true);
-                return;
-            }
-            ws.send(JSON.stringify({ command: 'setFrequency', channel }));
-        });
-
-        document.getElementById('pulse-auto-btn').addEventListener('click', () => {
-            pulseMode = 'auto';
-            document.getElementById('pulse-auto-btn').classList.add('pulse-mode-active');
-            document.getElementById('pulse-manual-btn').classList.remove('pulse-mode-active');
-        });
-
-        document.getElementById('pulse-manual-btn').addEventListener('click', () => {
-            pulseMode = 'manual';
-            document.getElementById('pulse-manual-btn').classList.add('pulse-mode-active');
-            document.getElementById('pulse-auto-btn').classList.remove('pulse-mode-active');
-        });
-
-        document.getElementById('set-pulse-btn').addEventListener('click', () => {
-            const value = parseInt(document.getElementById('pulse-input').value);
-            if (value < 0 || value > 10000) {
-                showStatus('Integration time must be 0-10000', true);
-                return;
-            }
-            ws.send(JSON.stringify({ command: 'setPulse', value, mode: pulseMode }));
-        });
-
-        document.getElementById('change-baudrate-btn').addEventListener('click', () => {
-            const mode = parseInt(document.getElementById('new-baudrate-select').value);
-            if (confirm('Changing baudrate will disconnect and reconnect. Continue?')) {
-                ws.send(JSON.stringify({ command: 'setBaudrate', mode }));
-            }
-        });
-
-        document.getElementById('start-scan-btn').addEventListener('click', () => {
-            const mode = document.getElementById('scan-mode').value;
-            ws.send(JSON.stringify({ command: 'startScan', mode }));
-        });
-
-        document.getElementById('stop-scan-btn').addEventListener('click', () => {
-            ws.send(JSON.stringify({ command: 'stopScan' }));
-        });
-
-        // ==================== Initialization ====================
-        // Restore last baudrate
-        const lastBaudrate = localStorage.getItem(STORAGE_KEYS.LAST_BAUDRATE);
-        if (lastBaudrate) {
-            document.getElementById('baudrate-select').value = lastBaudrate;
-        }
-
-        init();
-        connectWebSocket();
-    </script>
+    function updateUI(connected) {
+        document.getElementById('btnConnect').classList.toggle('hidden', connected);
+        document.getElementById('btnDisconnect').classList.toggle('hidden', !connected);
+        const b = document.getElementById('statusBadge');
+        b.innerText = connected ? "Connected" : "Disconnected";
+        b.className = `status-badge ${connected ? 'status-connected' : 'status-disconnected'}`;
+    }
+</script>
 </body>
 </html>
