@@ -127,6 +127,7 @@
 
 <div id="canvas-container"></div>
 <div id="fpsCounter">FPS: 0</div>
+<div id="tooltip" class="absolute hidden bg-black bg-opacity-80 text-white text-xs px-2 py-1 rounded pointer-events-none border border-green-400" style="z-index: 1000;"></div>
 
 <script>
     // --- THREE.JS SETUP ---
@@ -142,6 +143,29 @@
     controls.enableDamping = true;
     scene.add(new THREE.GridHelper(10, 20, 0x444444, 0x222222));
     scene.add(new THREE.AxesHelper(1));
+
+    // HOVER INTERACTION
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    raycaster.params.Line.threshold = 0.2; // Hit tolerance for lines
+    raycaster.params.Points.threshold = 0.2; // Hit tolerance for points
+    
+    // Hover Marker (Pulsing Sphere)
+    const markerGeo = new THREE.SphereGeometry(0.1, 16, 16);
+    const markerMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.8 });
+    const hoverMarker = new THREE.Mesh(markerGeo, markerMat);
+    hoverMarker.visible = false;
+    scene.add(hoverMarker);
+    const tooltip = document.getElementById('tooltip');
+
+    window.addEventListener('mousemove', (event) => {
+        const rect = container.getBoundingClientRect();
+        mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+        
+        tooltip.style.left = event.clientX + 15 + 'px';
+        tooltip.style.top = event.clientY + 15 + 'px';
+    });
 
     // --- SLAM VISUALIZATION ---
     // 1. Live Scan (Red Line)
@@ -255,7 +279,42 @@
         return pose;
     }
 
-    function animate() { requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); }
+    function animate() { 
+        requestAnimationFrame(animate); 
+        controls.update(); 
+        
+        // Raycasting
+        raycaster.setFromCamera(mouse, camera);
+        
+        // Check intersections with both Live Cloud and Global Map
+        const objectsToCheck = [cloud, globalMap];
+        const intersects = raycaster.intersectObjects(objectsToCheck);
+
+        if (intersects.length > 0) {
+            const hit = intersects[0];
+            const dist = hit.point.distanceTo(new THREE.Vector3(0,0,0)); // Distance from origin
+            // Or distance from Robot Pose? Usually user wants distance from Sensor (Origin).
+            
+            // Show Marker
+            hoverMarker.visible = true;
+            hoverMarker.position.copy(hit.point);
+            
+            // Pulse Animation
+            const scale = 1 + Math.sin(Date.now() * 0.01) * 0.3;
+            hoverMarker.scale.set(scale, scale, scale);
+
+            // Show Tooltip
+            tooltip.innerText = `Dist: ${dist.toFixed(2)}m`;
+            tooltip.classList.remove('hidden');
+            document.body.style.cursor = 'crosshair';
+        } else {
+            hoverMarker.visible = false;
+            tooltip.classList.add('hidden');
+            document.body.style.cursor = 'default';
+        }
+
+        renderer.render(scene, camera); 
+    }
     animate();
     window.addEventListener('resize', () => {
         camera.aspect = container.clientWidth / container.clientHeight;
@@ -544,6 +603,7 @@
             pointsGeometry.attributes.position.needsUpdate = true;
             pointsGeometry.attributes.color.needsUpdate = true;
             pointsGeometry.setDrawRange(0, lineIndex); // 2 points per segment
+            pointsGeometry.computeBoundingSphere(); // CRITICAL: Update bounds for Raycaster!
             
             document.getElementById('statValid').innerText = validCount;
 
@@ -574,6 +634,7 @@
                     }
                     mapGeo.attributes.position.needsUpdate = true;
                     mapGeo.setDrawRange(0, mapIndex);
+                    mapGeo.computeBoundingSphere(); // CRITICAL: Update bounds for Raycaster!
                 }
             }
         }
