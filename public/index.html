@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<parameter name="html" lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Lidar Scanner</title>
+    <title>CygLiDAR D1 Scanner</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
@@ -14,174 +14,411 @@
             height: 100%;
             width: 100%;
             overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
 
         #lidarCanvas {
             position: absolute;
             top: 0;
-            left: 0;
-            width: 100vw;
+            left: 340px;
+            width: calc(100vw - 340px);
             height: 100vh;
-            background-color: black;
-            z-index: 1;
+            background-color: #0a0a0a;
         }
 
-        .button-container {
+        .sidebar {
             position: fixed;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            display: flex;
-            gap: 10px;
-            z-index: 2;
-            background: rgba(0, 0, 0, 0.5);
-            padding: 10px 20px;
-            border-radius: 10px;
+            left: 0;
+            top: 0;
+            width: 340px;
+            height: 100vh;
+            background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+            color: #fff;
+            padding: 20px;
+            overflow-y: auto;
+            box-shadow: 4px 0 15px rgba(0, 0, 0, 0.5);
+            z-index: 10;
         }
 
-        /* Tooltip for displaying distance */
-        .tooltip {
-            position: absolute;
-            background-color: rgba(0, 0, 0, 0.7);
-            color: white;
-            padding: 5px 10px;
+        .sidebar h1 {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            color: #4ecca3;
+        }
+
+        .control-section {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .control-section h3 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #93deff;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .control-group {
+            margin-bottom: 12px;
+        }
+
+        .control-group label {
+            display: block;
+            font-size: 12px;
+            margin-bottom: 5px;
+            color: #b0b0b0;
+        }
+
+        select, input[type="number"] {
+            width: 100%;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            color: #fff;
+            font-size: 13px;
+        }
+
+        select:focus, input:focus {
+            outline: none;
+            border-color: #4ecca3;
+        }
+
+        button {
+            width: 100%;
+            padding: 10px 15px;
+            border: none;
             border-radius: 5px;
             font-size: 14px;
-            pointer-events: none;
-            z-index: 3;
-            display: none; /* Hidden by default */
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #4ecca3;
+            color: #1a1a2e;
+        }
+
+        .btn-primary:hover {
+            background: #3db88c;
+            transform: translateY(-1px);
+        }
+
+        .btn-danger {
+            background: #e84545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #d63939;
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        .btn-disabled {
+            background: rgba(255, 255, 255, 0.05);
+            color: rgba(255, 255, 255, 0.3);
+            cursor: not-allowed;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-top: 5px;
+        }
+
+        .status-connected {
+            background: #4ecca3;
+            color: #1a1a2e;
+        }
+
+        .status-disconnected {
+            background: rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            font-size: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .info-label {
+            color: #93deff;
+            font-weight: 500;
+        }
+
+        .info-value {
+            color: #fff;
+            font-family: monospace;
+        }
+
+        .pulse-mode-toggle {
+            display: flex;
+            gap: 5px;
+            margin-top: 8px;
+        }
+
+        .pulse-mode-toggle button {
+            flex: 1;
+            padding: 6px;
+            font-size: 11px;
+        }
+
+        .pulse-mode-active {
+            background: #4ecca3 !important;
+            color: #1a1a2e !important;
+        }
+
+        #status-message {
+            position: fixed;
+            bottom: 20px;
+            left: 360px;
+            background: rgba(0, 0, 0, 0.9);
+            color: #4ecca3;
+            padding: 12px 20px;
+            border-radius: 6px;
+            font-size: 13px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            z-index: 100;
+            display: none;
+        }
+
+        .scan-controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 10px;
         }
     </style>
 </head>
-<body class="bg-gray-900 text-white">
-    <!-- Floating Button Container -->
-    <div class="button-container">
-        <button id="start-scan" class="px-4 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700">
-            Start Scan
-        </button>
-        <button id="stop-scan" class="px-4 py-2 bg-red-600 text-white rounded shadow hover:bg-red-700">
-            Stop Scan
-        </button>
-        <select id="scan-mode" class="px-4 py-2 bg-gray-700 text-white rounded shadow">
-            <option value="2D" selected>2D Scan</option>
-            <option value="3D">3D Scan</option>
-        </select>
+<body>
+    <!-- Sidebar Control Panel -->
+    <div class="sidebar">
+        <h1>🛰️ CygLiDAR D1</h1>
+
+        <!-- Connection Section -->
+        <div class="control-section">
+            <h3>Connection</h3>
+            <div class="control-group">
+                <label>Serial Port</label>
+                <select id="port-select">
+                    <option value="">-- Select Port --</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>Baudrate</label>
+                <select id="baudrate-select">
+                    <option value="3000000">3,000,000 bps</option>
+                    <option value="921600">921,600 bps</option>
+                    <option value="115200" selected>115,200 bps</option>
+                    <option value="57600">57,600 bps</option>
+                </select>
+            </div>
+            <button id="connect-btn" class="btn-primary">Connect</button>
+            <button id="disconnect-btn" class="btn-danger" style="display:none; margin-top:10px;">Disconnect</button>
+            <div id="connection-status" class="status-badge status-disconnected">Disconnected</div>
+        </div>
+
+        <!-- Device Info Section -->
+        <div class="control-section" id="device-info-section" style="display:none;">
+            <h3>Device Information</h3>
+            <div class="info-row">
+                <span class="info-label">HW Version:</span>
+                <span class="info-value" id="hw-version">--</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">FW Version:</span>
+                <span class="info-value" id="fw-version">--</span>
+            </div>
+            <div class="info-row" style="border-bottom:none;">
+                <span class="info-label">Serial Number:</span>
+                <span class="info-value" id="serial-number">--</span>
+            </div>
+        </div>
+
+        <!-- Configuration Section -->
+        <div class="control-section" id="config-section" style="display:none;">
+            <h3>Configuration</h3>
+            <div class="control-group">
+                <label>Frequency Channel (0-15)</label>
+                <input type="number" id="frequency-input" min="0" max="15" value="0">
+                <button id="set-frequency-btn" class="btn-secondary" style="margin-top:8px;">Set Frequency</button>
+            </div>
+            <div class="control-group" style="margin-top:15px;">
+                <label>Integration Time (μs)</label>
+                <input type="number" id="pulse-input" min="0" max="10000" value="1000">
+                <div class="pulse-mode-toggle">
+                    <button id="pulse-auto-btn" class="btn-secondary pulse-mode-active">Auto</button>
+                    <button id="pulse-manual-btn" class="btn-secondary">Manual</button>
+                </div>
+                <button id="set-pulse-btn" class="btn-secondary" style="margin-top:8px;">Set Pulse</button>
+            </div>
+            <div class="control-group" style="margin-top:15px;">
+                <label>Change Baudrate</label>
+                <select id="new-baudrate-select">
+                    <option value="0">3,000,000 bps</option>
+                    <option value="1">921,600 bps</option>
+                    <option value="2" selected>115,200 bps</option>
+                    <option value="3">57,600 bps</option>
+                </select>
+                <button id="change-baudrate-btn" class="btn-secondary" style="margin-top:8px;">Change Baudrate</button>
+            </div>
+        </div>
+
+        <!-- Scan Control Section -->
+        <div class="control-section" id="scan-section" style="display:none;">
+            <h3>Scan Control</h3>
+            <div class="control-group">
+                <label>Scan Mode</label>
+                <select id="scan-mode">
+                    <option value="2D" selected>2D Scan</option>
+                    <option value="3D">3D Scan</option>
+                </select>
+            </div>
+            <div class="scan-controls">
+                <button id="start-scan-btn" class="btn-primary">Start Scan</button>
+                <button id="stop-scan-btn" class="btn-danger">Stop Scan</button>
+            </div>
+        </div>
     </div>
 
     <!-- Fullscreen Canvas -->
     <div id="lidarCanvas"></div>
 
-    <!-- Tooltip for showing distance -->
-    <div id="tooltip" class="tooltip"></div>
+    <!-- Status Message -->
+    <div id="status-message"></div>
 
     <script>
+        // ==================== LocalStorage Keys ====================
+        const STORAGE_KEYS = {
+            LAST_PORT: 'cyglidar.lastPort',
+            LAST_BAUDRATE: 'cyglidar.lastBaudrate'
+        };
+
+        // ==================== Global Variables ====================
         const container = document.getElementById('lidarCanvas');
-        const tooltip = document.getElementById('tooltip');
         let scene, camera, renderer, pointsMesh, lineMesh, controls;
         let ws;
         let currentPoints = [];
-        let previousPoints = [];
-        let scale = 0.5;
-        const smoothingFactor = 0.3; 
+        let isConnected = false;
+        let pulseMode = 'auto';
 
+        // ==================== Three.js Setup ====================
         function init() {
-            // Initialize Three.js scene
             scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            renderer = new THREE.WebGLRenderer();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            camera = new THREE.PerspectiveCamera(75, (window.innerWidth - 340) / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth - 340, window.innerHeight);
             container.appendChild(renderer.domElement);
 
-            // Add grid and axes
             addGrid();
             addAxes();
 
-            // Add Orbit Controls
             controls = new THREE.OrbitControls(camera, renderer.domElement);
-            camera.position.z = 100;
+            camera.position.set(5, 5, 10);
+            controls.update();
 
             window.addEventListener('resize', onWindowResize, false);
-            document.addEventListener('mousemove', showTooltip);
-
             animate();
         }
 
         function addGrid() {
-            const size = 200;
+            const size = 20;
             const divisions = 20;
-            const gridHelper = new THREE.GridHelper(size, divisions);
-            gridHelper.rotation.x = Math.PI / 2; // Rotate to align with XY plane
+            const gridHelper = new THREE.GridHelper(size, divisions, 0x444444, 0x222222);
             scene.add(gridHelper);
         }
 
         function addAxes() {
-            const axesHelper = new THREE.AxesHelper(50000);
+            const axesHelper = new THREE.AxesHelper(5);
             scene.add(axesHelper);
         }
 
         function onWindowResize() {
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            camera.aspect = window.innerWidth / window.innerHeight;
+            renderer.setSize(window.innerWidth - 340, window.innerHeight);
+            camera.aspect = (window.innerWidth - 340) / window.innerHeight;
             camera.updateProjectionMatrix();
         }
 
         function createPointsMesh(points) {
-            if (pointsMesh) {
-                scene.remove(pointsMesh);
-            }
+            if (pointsMesh) scene.remove(pointsMesh);
             if (points.length === 0) return;
 
             const geometry = new THREE.BufferGeometry();
             const vertices = new Float32Array(points.length * 3);
+            const colors = new Float32Array(points.length * 3);
+
             points.forEach((point, index) => {
-                vertices[index * 3] = point.x ;
-                vertices[index * 3 + 1] = point.y ;
-                vertices[index * 3 + 2] = point.z  || 0; // Default to 0 if z is undefined
+                vertices[index * 3] = point.x;
+                vertices[index * 3 + 1] = point.y;
+                vertices[index * 3 + 2] = point.z || 0;
+
+                // Color based on distance
+                const distance = Math.sqrt(point.x ** 2 + point.y ** 2 + (point.z || 0) ** 2);
+                const hue = (1 - Math.min(distance / 10, 1)) * 0.7; // Green to red
+                const rgb = hslToRgb(hue, 1, 0.5);
+                colors[index * 3] = rgb[0];
+                colors[index * 3 + 1] = rgb[1];
+                colors[index * 3 + 2] = rgb[2];
             });
+
             geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-            const material = new THREE.PointsMaterial({ color: 0x00ff00, size: 0.5 });
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const material = new THREE.PointsMaterial({ 
+                size: 0.08, 
+                vertexColors: true 
+            });
             pointsMesh = new THREE.Points(geometry, material);
             scene.add(pointsMesh);
         }
 
-        function createLineMesh(points) {
-            if (lineMesh) {
-                scene.remove(lineMesh);
+        function hslToRgb(h, s, l) {
+            let r, g, b;
+            if (s === 0) {
+                r = g = b = l;
+            } else {
+                const hue2rgb = (p, q, t) => {
+                    if (t < 0) t += 1;
+                    if (t > 1) t -= 1;
+                    if (t < 1/6) return p + (q - p) * 6 * t;
+                    if (t < 1/2) return q;
+                    if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                    return p;
+                };
+                const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+                const p = 2 * l - q;
+                r = hue2rgb(p, q, h + 1/3);
+                g = hue2rgb(p, q, h);
+                b = hue2rgb(p, q, h - 1/3);
             }
-            if (points.length === 0) return;
-
-            const geometry = new THREE.BufferGeometry();
-            const vertices = new Float32Array(points.length * 3);
-            points.forEach((point, index) => {
-                vertices[index * 3] = point.x;
-                vertices[index * 3 + 1] = point.y;
-                vertices[index * 3 + 2] = point.z || 0; // Default to 0 if z is undefined
-            });
-            geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
-            const material = new THREE.LineBasicMaterial({ color: 0xff5555 });
-            lineMesh = new THREE.Line(geometry, material);
-            scene.add(lineMesh);
+            return [r, g, b];
         }
 
         function updatePoints(newPoints) {
-            previousPoints = currentPoints;
             currentPoints = newPoints;
-            currentPoints = smoothData(currentPoints, previousPoints);
             createPointsMesh(currentPoints);
-            createLineMesh(currentPoints);
-        }
-
-        function smoothData(currentPoints, previousPoints) {
-            return currentPoints.map((point, index) => {
-                if (previousPoints[index]) {
-                    return {
-                        x: point.x * (1 - smoothingFactor) + previousPoints[index].x * smoothingFactor,
-                        y: point.y * (1 - smoothingFactor) + previousPoints[index].y * smoothingFactor,
-                        z: point.z * (1 - smoothingFactor) + (previousPoints[index].z || 0) * smoothingFactor
-                    };
-                }
-                return point;
-            });
         }
 
         function animate() {
@@ -190,55 +427,205 @@
             renderer.render(scene, camera);
         }
 
+        // ==================== WebSocket Setup ====================
         function connectWebSocket() {
             ws = new WebSocket('ws://localhost:3000');
-            ws.onopen = () => console.log('WebSocket connected');
+            
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                ws.send(JSON.stringify({ command: 'listPorts' }));
+            };
 
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
-                console.log("Received data:", data);
-                if (data.type === 'points') {
-                    updatePoints(data.points);
-                } else if (data.type === 'status') {
-                    console.log(data.message);
-                }
+                handleServerMessage(data);
             };
-            ws.onclose = () => connectWebSocket();
+
+            ws.onclose = () => {
+                console.log('WebSocket closed, reconnecting...');
+                setTimeout(connectWebSocket, 2000);
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
         }
 
-        function showTooltip(event) {
-            if (!pointsMesh) return;
+        function handleServerMessage(data) {
+            console.log('Received:', data);
 
-            const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
-            const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
+            switch (data.type) {
+                case 'ports':
+                    updatePortList(data.ports);
+                    break;
 
-            const raycaster = new THREE.Raycaster();
-            const mouse = new THREE.Vector2(mouseX, mouseY);
-            raycaster.setFromCamera(mouse, camera);
+                case 'connected':
+                    if (data.success) {
+                        isConnected = true;
+                        updateConnectionUI(true);
+                        showStatus('Connected successfully');
+                    }
+                    break;
 
-            const intersects = raycaster.intersectObject(pointsMesh);
+                case 'disconnected':
+                    isConnected = false;
+                    updateConnectionUI(false);
+                    showStatus('Disconnected');
+                    break;
 
-            if (intersects.length > 0) {
-                const point = intersects[0].point;
-                const distance = point.distanceTo(new THREE.Vector3(0, 0, 0)).toFixed(2);
-                tooltip.style.left = (event.clientX + 10) + 'px';
-                tooltip.style.top = (event.clientY + 10) + 'px';
-                tooltip.textContent = `Distance: ${distance  * 10 } mm`;
-                tooltip.style.display = 'block';
-            } else {
-                tooltip.style.display = 'none';
+                case 'deviceInfo':
+                    updateDeviceInfo(data.info);
+                    break;
+
+                case 'points':
+                    updatePoints(data.points);
+                    break;
+
+                case 'status':
+                    showStatus(data.message);
+                    break;
+
+                case 'error':
+                    showStatus('Error: ' + data.message, true);
+                    break;
             }
         }
 
-        // Button event listeners
-        document.getElementById('start-scan').addEventListener('click', () => {
-            const mode = document.getElementById('scan-mode').value;
-            ws.send(JSON.stringify({ command: 'start', mode }));
+        // ==================== UI Updates ====================
+        function updatePortList(ports) {
+            const select = document.getElementById('port-select');
+            select.innerHTML = '<option value="">-- Select Port --</option>';
+            
+            ports.forEach(port => {
+                const option = document.createElement('option');
+                option.value = port;
+                option.textContent = port;
+                select.appendChild(option);
+            });
+
+            // Restore last port
+            const lastPort = localStorage.getItem(STORAGE_KEYS.LAST_PORT);
+            if (lastPort && ports.includes(lastPort)) {
+                select.value = lastPort;
+            }
+        }
+
+        function updateConnectionUI(connected) {
+            const connectBtn = document.getElementById('connect-btn');
+            const disconnectBtn = document.getElementById('disconnect-btn');
+            const statusBadge = document.getElementById('connection-status');
+            const deviceInfo = document.getElementById('device-info-section');
+            const configSection = document.getElementById('config-section');
+            const scanSection = document.getElementById('scan-section');
+
+            if (connected) {
+                connectBtn.style.display = 'none';
+                disconnectBtn.style.display = 'block';
+                statusBadge.textContent = 'Connected';
+                statusBadge.className = 'status-badge status-connected';
+                deviceInfo.style.display = 'block';
+                configSection.style.display = 'block';
+                scanSection.style.display = 'block';
+            } else {
+                connectBtn.style.display = 'block';
+                disconnectBtn.style.display = 'none';
+                statusBadge.textContent = 'Disconnected';
+                statusBadge.className = 'status-badge status-disconnected';
+                deviceInfo.style.display = 'none';
+                configSection.style.display = 'none';
+                scanSection.style.display = 'none';
+            }
+        }
+
+        function updateDeviceInfo(info) {
+            document.getElementById('hw-version').textContent = info.hwVersion;
+            document.getElementById('fw-version').textContent = info.fwVersion;
+            document.getElementById('serial-number').textContent = info.serialNumber;
+        }
+
+        function showStatus(message, isError = false) {
+            const statusEl = document.getElementById('status-message');
+            statusEl.textContent = message;
+            statusEl.style.color = isError ? '#e84545' : '#4ecca3';
+            statusEl.style.display = 'block';
+            setTimeout(() => {
+                statusEl.style.display = 'none';
+            }, 3000);
+        }
+
+        // ==================== Event Listeners ====================
+        document.getElementById('connect-btn').addEventListener('click', () => {
+            const port = document.getElementById('port-select').value;
+            const baudrate = parseInt(document.getElementById('baudrate-select').value);
+
+            if (!port) {
+                showStatus('Please select a port', true);
+                return;
+            }
+
+            // Save to localStorage
+            localStorage.setItem(STORAGE_KEYS.LAST_PORT, port);
+            localStorage.setItem(STORAGE_KEYS.LAST_BAUDRATE, baudrate.toString());
+
+            ws.send(JSON.stringify({ command: 'connect', port, baudrate }));
         });
 
-        document.getElementById('stop-scan').addEventListener('click', () => {
-            ws.send(JSON.stringify({ command: 'stop' }));
+        document.getElementById('disconnect-btn').addEventListener('click', () => {
+            ws.send(JSON.stringify({ command: 'disconnect' }));
         });
+
+        document.getElementById('set-frequency-btn').addEventListener('click', () => {
+            const channel = parseInt(document.getElementById('frequency-input').value);
+            if (channel < 0 || channel > 15) {
+                showStatus('Frequency must be 0-15', true);
+                return;
+            }
+            ws.send(JSON.stringify({ command: 'setFrequency', channel }));
+        });
+
+        document.getElementById('pulse-auto-btn').addEventListener('click', () => {
+            pulseMode = 'auto';
+            document.getElementById('pulse-auto-btn').classList.add('pulse-mode-active');
+            document.getElementById('pulse-manual-btn').classList.remove('pulse-mode-active');
+        });
+
+        document.getElementById('pulse-manual-btn').addEventListener('click', () => {
+            pulseMode = 'manual';
+            document.getElementById('pulse-manual-btn').classList.add('pulse-mode-active');
+            document.getElementById('pulse-auto-btn').classList.remove('pulse-mode-active');
+        });
+
+        document.getElementById('set-pulse-btn').addEventListener('click', () => {
+            const value = parseInt(document.getElementById('pulse-input').value);
+            if (value < 0 || value > 10000) {
+                showStatus('Integration time must be 0-10000', true);
+                return;
+            }
+            ws.send(JSON.stringify({ command: 'setPulse', value, mode: pulseMode }));
+        });
+
+        document.getElementById('change-baudrate-btn').addEventListener('click', () => {
+            const mode = parseInt(document.getElementById('new-baudrate-select').value);
+            if (confirm('Changing baudrate will disconnect and reconnect. Continue?')) {
+                ws.send(JSON.stringify({ command: 'setBaudrate', mode }));
+            }
+        });
+
+        document.getElementById('start-scan-btn').addEventListener('click', () => {
+            const mode = document.getElementById('scan-mode').value;
+            ws.send(JSON.stringify({ command: 'startScan', mode }));
+        });
+
+        document.getElementById('stop-scan-btn').addEventListener('click', () => {
+            ws.send(JSON.stringify({ command: 'stopScan' }));
+        });
+
+        // ==================== Initialization ====================
+        // Restore last baudrate
+        const lastBaudrate = localStorage.getItem(STORAGE_KEYS.LAST_BAUDRATE);
+        if (lastBaudrate) {
+            document.getElementById('baudrate-select').value = lastBaudrate;
+        }
 
         init();
         connectWebSocket();
