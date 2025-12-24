@@ -1,38 +1,16 @@
-# NodeJS Lidar Visualizer
-This is lidar visualization using Cyglidar D1 with NodeJS.
-## Description
-* 2D Scanning
-* 3D Scanning (WIP)
-## Getting Started
-### Dependencies
-` npm install `
+# React + Vite
 
+This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
-### Executing program
-` npm run dev `
+Currently, two official plugins are available:
 
-## Help
-Please check the supported driver on usb  serial 
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
 
-Linux or Mac
-```
-ls /dev/ | grep usb
-```
+## React Compiler
 
-Windows 
-```
-Check on device managers and check USB devices
-```
-## Authors
-[Muhammad Reza Maulana](https://linkedin.com/in/mrezzaaa)
-## Version History
-* 0.1
+The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
 
+## Expanding the ESLint configuration
 
-## Example
-* 2D Scan
-![2D Image](image.png)
-
-* 3D Scan
-
-_WIP_
+If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
