@@ -9,7 +9,7 @@
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <style>
         body { margin: 0; overflow: hidden; background-color: #0a0a0a; color: white; font-family: sans-serif; }
-        #canvas-container { position: absolute; top: 0; left: 320px; width: calc(100% - 320px); height: 100%; }
+        #canvas-container { position: absolute; top: 0; left: 320px; width:100%; height: 100vh; }
         #sidebar {
             position: absolute; top: 0; left: 0; width: 320px; height: 100%;
             background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
@@ -83,6 +83,9 @@
             <button class="btn btn-primary" onclick="startScan()">Start</button>
             <button class="btn btn-danger" onclick="stopScan()">Stop</button>
         </div>
+        <button id="btnMeshToggle" class="btn btn-secondary mt-2 w-full" onclick="toggleMeshMode()">
+            Switch to Mesh
+        </button>
     </div>
 
     <!-- SLAM CONTROL -->
@@ -119,6 +122,7 @@
         <div class="info-row"><span class="info-label">Points</span> <span class="info-val" id="statPoints">0</span></div>
         <div class="info-row"><span class="info-label">Valid</span> <span class="info-val text-green-400" id="statValid">0</span></div>
         <div class="info-row"><span class="info-label">Errors</span> <span class="info-val text-red-400" id="statErrors">0</span></div>
+        <button id="exportScanBtn" disabled style="width: 100%; margin-top: 10px; background: #28a745; padding: 8px;">📥 Export Scan Data (CSV)</button>
     </div>
 
     <div class="text-xs text-gray-500 text-center mt-4">
@@ -126,11 +130,20 @@
     </div>
 </div>
 
-<div id="canvas-container"></div>
+<div style="display: flex; gap: 10px; padding: 10px; height: 100vh; box-sizing: border-box;">
+    <div id="canvas-container" style="flex: 1; height: 100%;"></div>
+    <div style="width: 320px; background: #0a0a0a; padding: 15px; border-radius: 8px;">
+        <h3 style="color: #fff; margin: 0 0 10px 0; font-size: 14px;">Depth Map (160×60)</h3>
+        <canvas id="depthCanvas" width="160" height="60" style="width: 100%; height: 150px; image-rendering: pixelated; border: 1px solid #444;"></canvas>
+        <p style="color: #888; font-size: 11px; margin-top: 8px;">🔵 Blue = Close (0-900mm) | 🔴 Red = Far (1800-3000mm)</p>
+    </div>
+</div>
 <div id="fpsCounter">FPS: 0</div>
 <div id="tooltip" class="absolute hidden bg-black bg-opacity-80 text-white text-xs px-2 py-1 rounded pointer-events-none border border-green-400" style="z-index: 1000;"></div>
 
 <script src="3d_constants.js"></script>
+<script src="slam_algorithms.js"></script>
+<script src="surface_reconstruction.js"></script>
 <script>
     // --- 3D MATH TABLES ---
     const tablex = new Float32Array(160 * 60);
@@ -202,7 +215,7 @@
     // --- THREE.JS SETUP ---
     const container = document.getElementById('canvas-container');
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0a0a);
+    scene.background = new THREE.Color(0x000000); // Pure black for drama
     
     // Use OrthographicCamera to avoid perspective distortion
     const aspect = container.clientWidth / container.clientHeight;
@@ -215,7 +228,7 @@
         0.1,                        // near
         100                         // far
     );
-    camera.position.set(0, 10, 0);  // Top-down view
+    camera.position.set(3, 3, 3);  // Angled view for better depth perception
     camera.lookAt(0, 0, 0); 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(container.clientWidth, container.clientHeight);
@@ -285,20 +298,63 @@
     geo3D.setAttribute('position', new THREE.BufferAttribute(pos3D, 3));
     geo3D.setAttribute('color', new THREE.BufferAttribute(col3D, 3));
     const mat3D = new THREE.PointsMaterial({ 
-        size: 0.02,  // Smaller, more precise points
+        size: 0.05,  // LARGER points for better visibility
         vertexColors: true,
-        sizeAttenuation: true,  // Points get smaller with distance
-        transparent: true,
-        opacity: 0.9
+        sizeAttenuation: true,
+        transparent: false,
+        opacity: 1.0
     });
     const cloud3D = new THREE.Points(geo3D, mat3D);
     cloud3D.frustumCulled = false;
+    
+    // 2c. 3D Mesh Surface (alternative to points)
+    const meshGeo3D = new THREE.BufferGeometry();
+    meshGeo3D.setAttribute('position', new THREE.BufferAttribute(pos3D, 3));
+    meshGeo3D.setAttribute('color', new THREE.BufferAttribute(col3D, 3));
+    
+    // Surface reconstruction with edge filtering
+    // Will be updated dynamically when data arrives
+    let meshIndices = [];
+    
+    // Function to rebuild mesh with discontinuity filtering
+    function rebuildMesh() {
+        meshIndices = SurfaceReconstruction.gridBasedMesh(pos3D, 160, 60, 0.2);
+        meshGeo3D.setIndex(meshIndices);
+        meshGeo3D.computeVertexNormals();
+    }
+    meshGeo3D.setIndex(meshIndices);
+    
+    const matMesh3D = new THREE.MeshPhongMaterial({
+        vertexColors: true,
+        side: THREE.DoubleSide,
+        flatShading: false,
+        shininess: 30
+    });
+    const mesh3D = new THREE.Mesh(meshGeo3D, matMesh3D);
+    mesh3D.frustumCulled = false;
+    mesh3D.visible = false; // Start with points mode
+    
     scene.add(cloud);
     scene.add(cloud3D);
+    scene.add(mesh3D);
     
-    // Clean scene - only axes for reference
-    const axesHelper = new THREE.AxesHelper(2);
+    // Add lighting for mesh
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(5, 10, 5);
+    scene.add(directionalLight);
+    
+    // DEBUG: Large visible axes to verify coordinate system
+    const axesHelper = new THREE.AxesHelper(5);  // 5 meters - HUGE!
+    axesHelper.visible = true;  // Always visible for debugging
     scene.add(axesHelper);
+    
+    // STANDARD axis orientation
+    console.log('=== AXIS ORIENTATION ===');
+    console.log('RED arrow = +X axis (horizontal/sideways)');
+    console.log('GREEN arrow = +Y axis (depth/forward)');
+    console.log('BLUE arrow = +Z axis (vertical/upward)');
 
     // 3. Robot Pose
     const robotGroup = new THREE.Group();
@@ -579,62 +635,42 @@
     }
 
     function parse3D(pkt, payloadLen) {
-        // Hide 2D, show 3D
+        // STRICT VALIDATION: Must have exact header 5A77FF413808
+        if (pkt[0] !== 0x5A || pkt[1] !== 0x77 || pkt[2] !== 0xFF ||
+            pkt[3] !== 0x41 || pkt[4] !== 0x38 || pkt[5] !== 0x08) {
+            console.log('Invalid 3D header - discarding packet');
+            return;
+        }
+        
+        // Convert buffer to hex string (skip header, exclude checksum)
+        const dataStart = 6;
+        const dataEnd = pkt.length - 1;
+        let hexData = '';
+        for (let i = dataStart; i < dataEnd; i++) {
+            hexData += pkt[i].toString(16).padStart(2, '0');
+        }
+        
+        // Validate: Must be exactly 9600 pixels = 28800 hex chars (14400 bytes × 2)
+        if (hexData.length !== 28800) {
+            console.log(`Invalid payload: ${hexData.length} chars, expected 28800`);
+            return;
+        }
+        
+        // Show 3D
         cloud.visible = false;
         cloud3D.visible = true;
-        
-        // Payload start: Index 6. Length payloadLen.
-        // Data block starts at Index 6 + 1 (PayloadHeader) = Index 7?
-        // Wait, Reference: Response Packet [5A 77 FF 41 38 08 ...]. 
-        // 08 is Type. Data follows immediately? Or is there a padding?
-        // lidar.ts: offset=3 (loop starts). 
-        // parse3D in lidar.ts: serialdata.replace(header). slice(0, len).
-        // Let's assume Data starts at Byte 6 (after Type).
-        
-        // Data Length: payloadLen - 1 (Type byte) - 1 (Checksum) ? No Checksum is IN packetLen but not PayloadLen? 
-        // Logic: Total = 6 + Payload. CS is at End.
-        // So Payload includes CS?
-        // Packet: [5A 77 FF L L T  (Data...) CS]
-        // PayloadLen = T + Data + CS?
-        // Let's look at 2D. 323. Payload=323. 
-        // Packet = 6 + 323 = 329.
-        // Data = 329 - 6(Head) - 1(Type) - 1(CS) = 321 bytes?
-        // 161 * 2 = 322. Close.
-        
-        // 3D: Payload 14401. 
-        // Data = 14400 bytes? (160*60*1.5 = 14400).
-        // So Data starts at index 6. 
-        
-        const dataStart = 6;
-        const width = 160;
-        const height = 60;
         
         const pos = geo3D.attributes.position.array;
         const col = geo3D.attributes.color.array;
         
         let pixelIdx = 0;
         
-        for (let bytePos = 0; bytePos < width * height * 1.5; bytePos += 3) {
-            const off = dataStart + bytePos;
-            if (off + 3 > pkt.length) break;
-
-            const b1 = pkt[off];
-            const b2 = pkt[off+1];
-            const b3 = pkt[off+2];
-
-            // 12-bit Unpacking
-            // P1 = b1 (8) + b2_high (4)
-            // P2 = b2_low (4) + b3 (8)
+        // Parse hex string: every 3 hex digits = 1 distance (12-bit value)
+        for (let i = 0; i < hexData.length; i += 3) {
+            const distHex = hexData.substr(i, 3);
+            const distance = parseInt(distHex, 16);
             
-            const val1 = (b1 << 4) | (b2 >> 4);
-            const val2 = ((b2 & 0x0F) << 8) | b3;
-
-            // Process P1 - pixel at pixelIdx
-            setPoint3D(pixelIdx, val1, pos, col);
-            pixelIdx++;
-            
-            // Process P2 - pixel at pixelIdx  
-            setPoint3D(pixelIdx, val2, pos, col);
+            setPoint3D(pixelIdx, distance, pos, col);
             pixelIdx++;
         }
         
@@ -642,59 +678,236 @@
         geo3D.attributes.color.needsUpdate = true;
         geo3D.computeBoundingSphere();
         
-        // Debug: Count valid vs error points
-        let validCount = 0, errorCount = 0, totalDist = 0;
+        // DEBUG: Analyze raw distance distribution
+        const distStats = { min: Infinity, max: 0, avg: 0, validCount: 0 };
+        const distHistogram = new Array(10).fill(0); // 10 bins
+        
         for (let i = 0; i < 9600; i++) {
-            if (pos[i*3] !== 0 || pos[i*3+1] !== 0 || pos[i*3+2] !== 0) {
-                validCount++;
-                totalDist += Math.sqrt(pos[i*3]**2 + pos[i*3+1]**2 + pos[i*3+2]**2);
-            } else {
-                errorCount++;
+            const dist = rawDistances[i];
+            if (dist > 0 && dist < 4080) {
+                distStats.validCount++;
+                distStats.min = Math.min(distStats.min, dist);
+                distStats.max = Math.max(distStats.max, dist);
+                distStats.avg += dist;
+                
+                // Histogram (0-2000mm in 10 bins, 200mm each)
+                const bin = Math.min(Math.floor(dist / 200), 9);
+                distHistogram[bin]++;
             }
         }
-        console.log(`Valid: ${validCount}, Errors: ${errorCount}, Avg dist: ${(totalDist/validCount).toFixed(2)}m`);
+        
+            distStats.avg /= distStats.validCount;
+            console.log('=== DISTANCE STATS ===');
+            console.log(`Valid points: ${distStats.validCount}/9600`);
+            console.log(`Range: ${distStats.min}mm - ${distStats.max}mm`);
+            console.log(`Average: ${distStats.avg.toFixed(0)}mm`);
+            console.log('Histogram (0-3000mm):', distHistogram);
+            
+            // Create COMPLETE grid table: R0-R59 (rows) × C0-C159 (columns)
+            console.log('\n=== COMPLETE DISTANCE GRID (60 rows × 160 columns) ===');
+            const completeGrid = {};
+            for (let r = 0; r < 60; r++) {
+                const rowData = {};
+                for (let c = 0; c < 160; c++) {
+                    const idx = c + (r * 160);
+                    const dist = rawDistances[idx];
+                    rowData[`C${c}`] = dist >= 4080 ? 'ERR' : dist;
+                }
+                completeGrid[`R${r}`] = rowData;
+            }
+            console.table(completeGrid);
+            
+            // Corner samples for quick reference
+            console.log('\n=== CORNER SAMPLES ===');
+            console.table({
+                'R0C0': rawDistances[0],
+                'R0C159': rawDistances[159],
+                'R59C0': rawDistances[9440],
+                'R59C159': rawDistances[9599],
+                'R30C80 (center)': rawDistances[4880]
+            });
+            
+            // Store latest scan data for export and enable button
+            latestScanData = new Uint16Array(rawDistances);
+            const exportBtn = document.getElementById('exportScanBtn');
+            if (exportBtn) exportBtn.disabled = false;
+        
+        // Update mesh geometry
+        meshGeo3D.attributes.position.needsUpdate = true;
+        meshGeo3D.attributes.color.needsUpdate = true;
+        
+        // Rebuild mesh with discontinuity filtering
+        rebuildMesh();
+        
+        // Render Depth Map
+        renderDepthMap();
+        
+        // SLAM Mapping for 3D scan (FULL 3D)
+        if (isMapping) {
+            const pos = geo3D.attributes.position.array;
+            const cos = Math.cos(robotPose.theta);
+            const sin = Math.sin(robotPose.theta);
+            const gPos = mapGeo.attributes.position.array;
+            
+            // Add scan every 5 frames with voxel filtering
+            if (frames % 5 === 0) {
+                // Convert 3D points with FULL 3D coordinates
+                const scanPoints = [];
+                for (let i = 0; i < 9600; i++) {
+                    const lx = pos[i*3];     // X (horizontal)
+                    const ly = pos[i*3+1];   // Y (vertical) - KEEP for 3D!
+                    const lz = pos[i*3+2];   // Z (depth)
+                    
+                    // Skip zero/invalid points
+                    if (lx === 0 && ly === 0 && lz === 0) continue;
+                    
+                    // Transform to global frame (FULL 3D)
+                    const gx = lx * cos - lz * sin + robotPose.x;
+                    const gz = lx * sin + lz * cos + robotPose.y;
+                    const gy = ly;  // Keep vertical coordinate as-is
+                    
+                    scanPoints.push({x: gx, y: gy, z: gz});
+                }
+                
+                // Apply voxel grid filter (0.05m voxel size)
+                const voxelFilter = new VoxelGridFilter(0.05);
+                const filtered = voxelFilter.filter(scanPoints);
+                
+                // Add filtered points to map with FULL 3D
+                for (let i = 0; i < filtered.length; i++) {
+                    if (mapIndex >= MAP_SIZE) break;
+                    
+                    gPos[mapIndex*3] = filtered[i].x;
+                    gPos[mapIndex*3+1] = filtered[i].y;  // Store actual Y!
+                    gPos[mapIndex*3+2] = filtered[i].z;
+                    mapIndex++;
+                }
+                
+                mapGeo.attributes.position.needsUpdate = true;
+                mapGeo.setDrawRange(0, mapIndex);
+                mapGeo.computeBoundingSphere();
+            }
+        }
+    }
+    
+    // Toggle between points and mesh
+    let useMeshMode = false;
+    function toggleMeshMode() {
+        useMeshMode = !useMeshMode;
+        cloud3D.visible = !useMeshMode;
+        mesh3D.visible = useMeshMode;
+        document.getElementById('btnMeshToggle').textContent = 
+            useMeshMode ? 'Switch to Points' : 'Switch to Mesh';
+    }
+    
+    // Depth Map Renderer with HEATMAP colors
+    const depthCanvas = document.getElementById('depthCanvas');
+    const depthCtx = depthCanvas.getContext('2d');
+    const depthImageData = depthCtx.createImageData(160, 60);
+    
+    // Store raw distances for depth map
+    const rawDistances = new Uint16Array(9600);
+    
+    function renderDepthMap() {
+        const width = 160;
+        const height = 60;
+        
+        for (let idx = 0; idx < 9600; idx++) {
+            const row = Math.floor(idx / width);
+            const col = idx % width;
+            
+            // Get raw distance value (in mm)
+            const distance = rawDistances[idx];
+            
+            // Heatmap color (Blue=close, Red=far)
+            // 0-3000mm range
+            let r, g, b;
+            
+            if (distance >= 4080) {
+                // Error/invalid - show black
+                r = g = b = 0;
+            } else {
+                const normalized = Math.min(distance / 3000.0, 1.0);
+                const hue = (1.0 - normalized) * 240; // 240=blue, 0=red
+                
+                // HSL to RGB conversion
+                const c = 1.0;
+                const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+                
+                if (hue < 60) { r = c; g = x; b = 0; }
+                else if (hue < 120) { r = x; g = c; b = 0; }
+                else if (hue < 180) { r = 0; g = c; b = x; }
+                else if (hue < 240) { r = 0; g = x; b = c; }
+                else { r = x; g = 0; b = c; }
+            }
+            
+            // Set pixel color (RGBA)
+            const pixelIdx = (row * width + col) * 4;
+            depthImageData.data[pixelIdx + 0] = r * 255;
+            depthImageData.data[pixelIdx + 1] = g * 255;
+            depthImageData.data[pixelIdx + 2] = b * 255;
+            depthImageData.data[pixelIdx + 3] = 255;
+        }
+        
+        depthCtx.putImageData(depthImageData, 0, 0);
     }
 
     function setPoint3D(idx, rawDist, pos, col) {
         if (idx >= 9600) return;
         
-        // D1_Const::INVALID_DATA_3D = 4080 and above are error codes
-        if (rawDist >= 4080) {
-            pos[idx*3] = 0; pos[idx*3+1] = 0; pos[idx*3+2] = 0;
-            return;
+        // Store raw distance for depth map
+        rawDistances[idx] = rawDist;
+        
+        // Handle error codes - render transparent instead of hiding
+        const isError = rawDist >= 4080;
+        
+        // EXACT OFFICIAL MAPPING from cyglidar_pcl_publisher.cpp
+        // calcPointCloud(distance, BufferIndex, pos_x, pos_y, pos_z)
+        const pos_x = rawDist * tablex[idx];  // mm
+        const pos_y = rawDist * tabley[idx];  // mm
+        const pos_z = rawDist * tablez[idx];  // mm
+        
+        const MM2M = 0.001;
+        
+        // ROS coordinate mapping (line 74-76 of official code)
+        // scan_3D->points[i].x =  pos_z * MM2M;
+        // scan_3D->points[i].y = -pos_x * MM2M;
+        // scan_3D->points[i].z = -pos_y * MM2M;
+        pos[idx*3]     = (isError ? 0 :  pos_x * MM2M);   // X =  pos_z
+        pos[idx*3+1]   = (isError ? 0 : -pos_y * MM2M);   // Y = -pos_x
+        pos[idx*3+2]   = (isError ? 0 : -pos_z * MM2M);   // Z = -pos_y
+
+        // Color scheme
+        let hue, saturation, lightness;
+        
+        if (isError) {
+            // Error codes (4080-4083) - dark gray
+            hue = 0;
+            saturation = 0;
+            lightness = 0.1;
+        } else {
+            // Official max distance: 3000mm (not 2000mm!)
+            const normalized = Math.min(rawDist/3000, 1);
+            
+            if (normalized < 0.3) {
+                // Very close (0-900mm) - BRIGHT CYAN
+                hue = 0.5;
+                saturation = 1.0;
+                lightness = 0.6;
+            } else if (normalized < 0.6) {
+                // Medium (900-1800mm) - Blue to green
+                hue = 0.5 - (normalized - 0.3) * 0.6;
+                saturation = 1.0;
+                lightness = 0.5;
+            } else {
+                // Far (1800-3000mm) - Yellow to red
+                hue = 0.15 - (normalized - 0.6) * 0.3;
+                saturation = 1.0;
+                lightness = 0.4;
+            }
         }
-
-        // transformPixel - exactly like CYG_Distortion.cpp line 71-73
-        const x = rawDist * tablex[idx];  // mm
-        const y = rawDist * tabley[idx];  // mm
-        const z = rawDist * tablez[idx];  // mm
-
-        // Direct angular mapping (NO lens distortion correction)
-        // This gives flat rectangular FOV without curved edges
-        const width = 160;
-        const height = 60;
-        const gridRow = Math.floor(idx / width);
-        const gridCol = idx % width;
         
-        // Calculate angles from pixel position
-        const HFOV = 120; // degrees
-        const VFOV = 65;  // degrees
-        const horizontalAngle = ((gridCol / width) - 0.5) * HFOV * (Math.PI / 180);
-        const verticalAngle = ((gridRow / height) - 0.5) * VFOV * (Math.PI / 180);
-        
-        // Spherical to Cartesian (simplified - no lens correction)
-        const distance_m = rawDist * 0.001;
-        const x_direct = distance_m * Math.sin(horizontalAngle);
-        const y_direct = distance_m * Math.sin(verticalAngle);
-        const z_direct = distance_m * Math.cos(horizontalAngle) * Math.cos(verticalAngle);
-        
-        pos[idx*3]     =  x_direct;
-        pos[idx*3+1]   = -y_direct;
-        pos[idx*3+2]   = -z_direct;
-
-        // Color heatmap (DISTANCE_MAX_VALUE_3D = 3000mm)
-        const hue = (1.0 - Math.min(rawDist/3000, 1)) * 0.7;
-        const c = new THREE.Color().setHSL(hue, 1, 0.5);
+        const c = new THREE.Color().setHSL(hue, saturation, lightness);
         col[idx*3] = c.r; col[idx*3+1] = c.g; col[idx*3+2] = c.b;
     }
 
@@ -817,26 +1030,35 @@
                 const sin = Math.sin(robotPose.theta);
                 const gPos = mapGeo.attributes.position.array;
                 
-                // Add 1 scan every 5 frames
+                // Add 1 scan every 5 frames with voxel filtering
                 if (frames % 5 === 0) {
-                    // Stride for performance
-                    for(let i=0; i<cleanPoints.length; i+=4) { 
+                    // Convert to points array for voxel filter
+                    const scanPoints = [];
+                    for(let i=0; i<cleanPoints.length; i++) {
+                        const lx = cleanPoints[i].x;
+                        const lz = cleanPoints[i].y;
+                        const gx = lx * cos - lz * sin + robotPose.x;
+                        const gz = lx * sin + lz * cos + robotPose.y;
+                        scanPoints.push({x: gx, y: 0, z: gz});
+                    }
+                    
+                    // Apply voxel grid filter (0.05m voxel size)
+                    const voxelFilter = new VoxelGridFilter(0.05);
+                    const filtered = voxelFilter.filter(scanPoints);
+                    
+                    // Add filtered points to map
+                    for(let i=0; i<filtered.length; i++) {
                         if (mapIndex >= MAP_SIZE) break;
                         
-                        const lx = cleanPoints[i].x;
-                        const lz = cleanPoints[i].y; 
-
-                        const gx = lx * cos - lz * sin + robotPose.x;
-                        const gz = lx * sin + lz * cos + robotPose.y; 
-                        
-                        gPos[mapIndex*3] = gx;
+                        gPos[mapIndex*3] = filtered[i].x;
                         gPos[mapIndex*3+1] = 0;
-                        gPos[mapIndex*3+2] = gz;
+                        gPos[mapIndex*3+2] = filtered[i].z;
                         mapIndex++;
                     }
+                    
                     mapGeo.attributes.position.needsUpdate = true;
                     mapGeo.setDrawRange(0, mapIndex);
-                    mapGeo.computeBoundingSphere(); // CRITICAL: Update bounds for Raycaster!
+                    mapGeo.computeBoundingSphere();
                 }
             }
         }
@@ -876,6 +1098,55 @@
         robotPose = { x:0, y:0, theta:0 };
         robotGroup.position.set(0,0,0);
         robotGroup.rotation.y = 0;
+    }
+
+    // ============ CSV EXPORT FUNCTIONALITY ============
+    let latestScanData = null;
+    
+    function exportScanToCSV() {
+        if (!latestScanData) {
+            alert('No scan data available. Please run a 3D scan first.');
+            return;
+        }
+        
+        // Generate CSV content
+        // Header: Row,C0,C1,...,C159
+        let csv = 'Row';
+        for (let c = 0; c < 160; c++) {
+            csv += `,C${c}`;
+        }
+        csv += '\n';
+        
+        // Generate data rows (R0-R59, C0-C159)
+        for (let r = 0; r < 60; r++) {
+            csv += `R${r}`;
+            for (let c = 0; c < 160; c++) {
+                const idx = c + (r * 160);
+                const dist = latestScanData[idx];
+                // Replace error values (>=4080) with 0
+                csv += `,${dist >= 4080 ? 0 : dist}`;
+            }
+            csv += '\n';
+        }
+        
+        // Create and trigger download
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `lidar_scan_${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+        console.log('✅ Scan data exported to CSV successfully!');
+    }
+    
+    // Attach export button handler if it exists
+    const exportBtn = document.getElementById('exportScanBtn');
+    if (exportBtn) {
+        exportBtn.addEventListener('click', exportScanToCSV);
     }
 
     // Manual Teleop (Simulated Odometry)
