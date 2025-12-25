@@ -25,6 +25,7 @@ interface ParserCallbacks {
  */
 export class Parser {
     private buffer: Uint8Array;
+    private hexBuffer: string = '';  // For hexstring mode accumulation
     public frames: number;
     public parserMode: ParserMode = 'bitshift';
     
@@ -41,18 +42,33 @@ export class Parser {
         this.onInfo = callbacks.onInfo || (() => {});
     }
 
-    pushData(data: Uint8Array) {
-        const newBuffer = new Uint8Array(this.buffer.length + data.length);
-        newBuffer.set(this.buffer);
-        newBuffer.set(data, this.buffer.length);
-        this.buffer = newBuffer;
-        
-        // Log small packets (likely INFO responses)
-        if (data.length < 20) {
-            console.log('[Parser] RX:', Array.from(data).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+    setParserMode(mode: ParserMode) {
+        console.log(`[Parser] Mode changing: ${this.parserMode} → ${mode}`);
+        this.parserMode = mode;
+    }
+
+    pushData(data: Uint8Array | string) {
+        if (typeof data === 'string') {
+            // HEXSTRING MODE: Accumulate hex string
+            this.hexBuffer += data;
+            console.log(`[Parser] Hex buffer accumulated: +${data.length} chars, total: ${this.hexBuffer.length}`);
+            
+            // Process hex buffer for header-to-header extraction
+            this.processHexBuffer();
+        } else {
+            // BITSHIFT MODE: Existing path, DO NOT MODIFY
+            const newBuffer = new Uint8Array(this.buffer.length + data.length);
+            newBuffer.set(this.buffer);
+            newBuffer.set(data, this.buffer.length);
+            this.buffer = newBuffer;
+            
+            // Log small packets (likely INFO responses)
+            if (data.length < 20) {
+                console.log('[Parser] RX:', Array.from(data).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+            }
+            
+            this.processBuffer();
         }
-        
-        this.processBuffer();
     }
 
     private processBuffer() {
@@ -253,6 +269,108 @@ export class Parser {
         }
     }
 
+    /**
+     * Process hex buffer - detect headers and extract packets (header-to-header)
+     * LOGGING ONLY for Phase 4 - user verification required before parsing
+     */
+    private processHexBuffer() {
+        // Prevent buffer overflow
+        if (this.hexBuffer.length > 100000) {
+            console.warn('[Parser] Hex buffer overflow, trimming...');
+            this.hexBuffer = this.hexBuffer.slice(-50000);
+        }
+
+        const H2D_STR = "5a77ff430101";
+        const H3D_STR = "5a77ff413808";
+        const HINFO_STR = "5a77ff0700";
+
+        // Find first header
+        const h2dIdx = this.hexBuffer.indexOf(H2D_STR);
+        const h3dIdx = this.hexBuffer.indexOf(H3D_STR);
+        const hInfoIdx = this.hexBuffer.indexOf(HINFO_STR);
+
+        const candidates = [
+            { idx: h2dIdx, type: '2D', header: H2D_STR },
+            { idx: h3dIdx, type: '3D', header: H3D_STR },
+            { idx: hInfoIdx, type: 'INFO', header: HINFO_STR }
+        ].filter(c => c.idx >= 0);
+
+        if (candidates.length === 0) {
+            // No headers found yet
+            return;
+        }
+
+        // Get earliest header
+        candidates.sort((a, b) => a.idx - b.idx);
+        const first = candidates[0];
+
+        // Discard data before first header
+        if (first.idx > 0) {
+            console.log(`[Parser] Discarding ${first.idx} chars before ${first.type} header`);
+            this.hexBuffer = this.hexBuffer.slice(first.idx);
+        }
+
+        // ============================================================
+        // 2D MODE: Use FIXED LENGTH extraction (more stable)
+        // ============================================================
+        if (first.type === '2D') {
+            const FIXED_2D_LENGTH = 658; // Header(12) + Data(644) + CS(2)
+            
+            if (this.hexBuffer.length < FIXED_2D_LENGTH) {
+                console.log(`[Parser] 2D header found, waiting for complete packet... (buffer: ${this.hexBuffer.length}/${FIXED_2D_LENGTH})`);
+                return;
+            }
+            
+            const packetString = this.hexBuffer.slice(0, FIXED_2D_LENGTH);
+            console.log(`[Parser] 2D FIXED-LENGTH EXTRACTED: ${FIXED_2D_LENGTH} chars`);
+            
+            this.parse2DHex(packetString);
+            this.hexBuffer = this.hexBuffer.slice(FIXED_2D_LENGTH);
+            this.frames++;
+            return; // Exit early for 2D
+        }
+
+        // ============================================================
+        // 3D / INFO MODE: Use HEADER-TO-HEADER extraction
+        // ============================================================
+        // Find next header (for header-to-header extraction)
+        const searchStart = first.header.length;
+        const nextCandidates = [
+            { idx: this.hexBuffer.indexOf(H2D_STR, searchStart), type: '2D' },
+            { idx: this.hexBuffer.indexOf(H3D_STR, searchStart), type: '3D' },
+            { idx: this.hexBuffer.indexOf(HINFO_STR, searchStart), type: 'INFO' }
+        ].filter(c => c.idx > 0);
+
+        if (nextCandidates.length === 0) {
+            console.log(`[Parser] ${first.type} header found at 0, waiting for next header... (buffer: ${this.hexBuffer.length} chars)`);
+            return;
+        }
+
+        nextCandidates.sort((a, b) => a.idx - b.idx);
+        const next = nextCandidates[0];
+
+        // Extract packet (header-to-header)
+        const packetString = this.hexBuffer.slice(0, next.idx);
+
+        // DETAILED LOGGING FOR USER VERIFICATION
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        console.log(`[Parser] PACKET EXTRACTED (${first.type})`);
+        console.log(`  ┌─ Start: ${first.type} header at position 0`);
+        console.log(`  ├─ End: ${next.type} header at position ${next.idx}`);
+        console.log(`  ├─ Total length: ${packetString.length} chars (${packetString.length / 2} bytes)`);
+        console.log(`  ├─ First 60 chars: ${packetString.substring(0, 60)}`);
+        console.log(`  └─ Last 60 chars: ${packetString.substring(packetString.length - 60)}`);
+        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+        // Phase 5: Parse packet based on type
+        if (first.type === 'INFO') this.parseInfoHex(packetString);
+        else if (first.type === '2D') this.parse2DHex(packetString);
+        else if (first.type === '3D') this.parse3DHex(packetString);
+
+        // Advance buffer to next header
+        this.hexBuffer = this.hexBuffer.slice(next.idx);
+    }
+
     private matchHeader(offset: number, pattern: number[]): boolean {
         for(let i=0; i<pattern.length; i++) {
             if (this.buffer[offset+i] !== pattern[i]) return false;
@@ -419,6 +537,114 @@ export class Parser {
          
          this.on2D(points);
          console.log(`[Parser] 2D HexString - Valid points: ${points.length} / ${Math.floor(dataOnly.length / 4)} total`);
+    }
+
+    /**
+     * Parse INFO packet from hexstring (Phase 5)
+     * Input: full packet as hexstring
+     */
+    private parseInfoHex(packetStr: string) {
+        // Remove header (first 12 chars)
+        const dataStr = packetStr.slice(12);
+        
+        // Parse firmware version (chars 0-5 → bytes 0-2)
+        const fw1 = parseInt(dataStr.slice(0, 2), 16);
+        const fw2 = parseInt(dataStr.slice(2, 4), 16);
+        const fw3 = parseInt(dataStr.slice(4, 6), 16);
+        
+        // Parse hardware version (chars 6-11 → bytes 3-5)
+        const hw1 = parseInt(dataStr.slice(6, 8), 16);
+        const hw2 = parseInt(dataStr.slice(8, 10), 16);
+        const hw3 = parseInt(dataStr.slice(10, 12), 16);
+        
+        const ver = `${fw1}.${fw2}.${fw3}`;
+        const hw = `${hw1}.${hw2}.${hw3}`;
+        
+        this.onInfo({ ver, hw });
+        console.log(`[Parser] Device Info (Hex Mode): FW=${ver}, HW=${hw}`);
+    }
+
+    /**
+     * Parse 2D scan from hexstring (Phase 5)
+     * Input: full packet as hexstring, 4 chars (16-bit) per distance
+     * Format: LSB+MSB per angle, 0.75° resolution from -60° to +60°
+     */
+    private parse2DHex(packetStr: string) {
+        // Remove header (12 chars) and checksum (last 2 chars)
+        const dataStr = packetStr.slice(12, packetStr.length - 2);
+        
+        // 2D uses 16-bit (4 hex chars) per distance
+        if (dataStr.length % 4 !== 0) {
+            console.warn(`[Parser] 2D Hex skipped - invalid length: ${dataStr.length} (not divisible by 4)`);
+            // Skip this packet but continue processing
+            return;
+        }
+        
+        // Sanity check: expected ~161 points × 4 = ~644 chars
+        // Allow range 100-2000 chars to handle variations
+        if (dataStr.length < 100 || dataStr.length > 2000) {
+            console.warn(`[Parser] 2D Hex skipped - unexpected size: ${dataStr.length} chars`);
+            return;
+        }
+        
+        const numPoints = dataStr.length / 4;
+        const points: Point2D[] = [];
+        
+        for (let i = 0; i < numPoints; i++) {
+            // Read 4 hex chars = 16-bit value (LSB+MSB)
+            const hexChars = dataStr.substring(i * 4, i * 4 + 4);
+            const dist = parseInt(hexChars, 16);
+            
+            // Angle: -60° to +60° based on point index
+            const angleRad = (-60 + (i * (120.0 / (numPoints - 1 || 1)))) * (Math.PI / 180);
+
+            if (!isNaN(dist) && dist > 50 && dist < 16000) {
+                const dm = dist * 0.001;
+                points.push({ 
+                    x: -Math.sin(angleRad) * dm, 
+                    y: 0, 
+                    z: Math.cos(angleRad) * dm, 
+                    color: 0x00ff00 
+                });
+            }
+        }
+        
+        console.log(`[Parser] 2D Hex Mode (16-bit): ${points.length}/${numPoints} valid points`);
+        this.on2D(points);
+    }
+
+    /**
+     * Parse 3D scan from hexstring (Phase 5)
+     * Input: full packet as hexstring, 3 chars per pixel (9600 pixels)
+     */
+    private parse3DHex(packetStr: string) {
+        // Remove header (12 chars) only
+        const dataStr = packetStr.slice(12);
+        
+        // Accept if close to expected length (allow some tolerance)
+        const expectedMin = 28800;
+        const expectedMax = 28806; // Allow small variance
+        
+        if (dataStr.length < expectedMin || dataStr.length > expectedMax) {
+            console.warn(`[Parser] 3D Hex length: ${dataStr.length} (expected ~${expectedMin})`);
+            // Continue anyway for now
+        }
+
+        const totalPixels = 9600;
+        const points = new Float32Array(totalPixels * 4);
+        const distances = new Uint16Array(totalPixels);
+        
+        for (let i = 0; i < totalPixels; i++) {
+            const hexChars = dataStr.substring(i * 3, i * 3 + 3);
+            const rawDist = parseInt(hexChars, 16);
+            const dist = (isNaN(rawDist) || rawDist >= 4080) ? 0 : rawDist;
+            
+            distances[i] = dist;
+            this.computePoint(i, dist, points);
+        }
+        
+        console.log(`[Parser] 3D Hex Mode: ${totalPixels} pixels parsed`);
+        this.on3D(points, distances);
     }
 
     private parseInfo(pkt: Uint8Array) {

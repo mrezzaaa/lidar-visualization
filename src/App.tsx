@@ -130,9 +130,11 @@ function App() {
   // Update parser mode when changed
   useEffect(() => {
     if (parserRef.current) {
-      parserRef.current.parserMode = parserMode;
+      parserRef.current.setParserMode(parserMode);
       console.log('[App] Parser mode changed to:', parserMode);
     }
+    // Also update SerialHandler to convert data at read level
+    serialRef.current.setHexMode(parserMode === 'hexstring');
   }, [parserMode]);
 
   const handleConnect = async (baudRate: number) => {

@@ -5,12 +5,18 @@ export class SerialHandler {
     private port: SerialPort | null = null;
     private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
     private keepReading: boolean = false;
+    private convertToHex: boolean = false;  // For hexstring parser mode
     
-    public onData: ((data: Uint8Array) => void) | null = null;
+    public onData: ((data: Uint8Array | string) => void) | null = null;  // Accept both types
     public onError: ((error: unknown) => void) | null = null;
     public onDisconnect: (() => void) | null = null;
 
     constructor() {
+    }
+
+    setHexMode(enabled: boolean) {
+        this.convertToHex = enabled;
+        console.log(`[Serial] Hex conversion mode: ${enabled}`);
     }
 
     async connect(baudRate: number = 3000000): Promise<boolean> {
@@ -52,7 +58,19 @@ export class SerialHandler {
                 const { value, done } = await this.reader.read();
                 if (done) break;
                 if (value && this.onData) {
-                    this.onData(value);
+                    if (this.convertToHex) {
+                        // HEXSTRING MODE: Convert bytes to hex string (matching Python .hex())
+                        const hexString = Array.from(value)
+                            .map(b => b.toString(16).padStart(2, '0'))
+                            .join('');
+                        if (hexString.length < 100) {
+                            console.log('[Serial] RX Hex:', hexString);
+                        }
+                        this.onData(hexString);
+                    } else {
+                        // BITSHIFT MODE: Pass bytes directly (existing behavior)
+                        this.onData(value);
+                    }
                 }
             }
         } catch (error) {
