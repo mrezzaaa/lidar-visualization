@@ -63,9 +63,7 @@ export class SerialHandler {
                         const hexString = Array.from(value)
                             .map(b => b.toString(16).padStart(2, '0'))
                             .join('');
-                        if (hexString.length < 100) {
-                            console.log('[Serial] RX Hex:', hexString);
-                        }
+                        // Removed noisy log
                         this.onData(hexString);
                     } else {
                         // BITSHIFT MODE: Pass bytes directly (existing behavior)

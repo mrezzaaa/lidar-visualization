@@ -1,3 +1,4 @@
+import { distance } from 'three/tsl';
 import { tablex, tabley, tablez } from './Constants3D';
 
 export interface Point2D {
@@ -51,7 +52,7 @@ export class Parser {
         if (typeof data === 'string') {
             // HEXSTRING MODE: Accumulate hex string
             this.hexBuffer += data;
-            console.log(`[Parser] Hex buffer accumulated: +${data.length} chars, total: ${this.hexBuffer.length}`);
+            // Removed noisy log - only log on packet extraction
             
             // Process hex buffer for header-to-header extraction
             this.processHexBuffer();
@@ -317,8 +318,7 @@ export class Parser {
             const FIXED_2D_LENGTH = 658; // Header(12) + Data(644) + CS(2)
             
             if (this.hexBuffer.length < FIXED_2D_LENGTH) {
-                console.log(`[Parser] 2D header found, waiting for complete packet... (buffer: ${this.hexBuffer.length}/${FIXED_2D_LENGTH})`);
-                return;
+                return; // Wait silently
             }
             
             const packetString = this.hexBuffer.slice(0, FIXED_2D_LENGTH);
@@ -331,7 +331,26 @@ export class Parser {
         }
 
         // ============================================================
-        // 3D / INFO MODE: Use HEADER-TO-HEADER extraction
+        // 3D MODE: Use FIXED LENGTH extraction (more stable)
+        // ============================================================
+        if (first.type === '3D') {
+            const FIXED_3D_LENGTH = 28814; // Header(12) + Data(28800) + CS(2)
+            
+            if (this.hexBuffer.length < FIXED_3D_LENGTH) {
+                return; // Wait silently
+            }
+            
+            const packetString = this.hexBuffer.slice(0, FIXED_3D_LENGTH);
+            console.log(`[Parser] 3D FIXED-LENGTH EXTRACTED: ${FIXED_3D_LENGTH} chars`);
+            
+            this.parse3DHex(packetString);
+            this.hexBuffer = this.hexBuffer.slice(FIXED_3D_LENGTH);
+            this.frames++;
+            return; // Exit early for 3D
+        }
+
+        // ============================================================
+        // INFO MODE: Use HEADER-TO-HEADER extraction
         // ============================================================
         // Find next header (for header-to-header extraction)
         const searchStart = first.header.length;
@@ -342,8 +361,7 @@ export class Parser {
         ].filter(c => c.idx > 0);
 
         if (nextCandidates.length === 0) {
-            console.log(`[Parser] ${first.type} header found at 0, waiting for next header... (buffer: ${this.hexBuffer.length} chars)`);
-            return;
+            return; // Wait silently for next header
         }
 
         nextCandidates.sort((a, b) => a.idx - b.idx);
@@ -422,7 +440,8 @@ export class Parser {
     }
 
     private computePoint(idx: number, dist: number, points: Float32Array) {
-        if (dist >= 4080) { // Invalid / Low Intensity
+        // TEMPORARILY RELAXED for debugging - accept any non-zero distance
+        if (dist === 0 || dist > 4090) { // Only reject 0 or clearly invalid
              points[idx*4] = 0;
              points[idx*4+1] = 0;
              points[idx*4+2] = 0;
@@ -615,35 +634,90 @@ export class Parser {
 
     /**
      * Parse 3D scan from hexstring (Phase 5)
-     * Input: full packet as hexstring, 3 chars per pixel (9600 pixels)
+     * Input: full packet as hexstring
+     * Format: 12-bit packed (2 pixels per 3 bytes = 6 hex chars)
      */
     private parse3DHex(packetStr: string) {
-        // Remove header (12 chars) only
-        const dataStr = packetStr.slice(12);
+        // Remove header (12 chars) and checksum (last 2 chars)
+        const dataStr = packetStr.slice(12, packetStr.length - 2);
         
-        // Accept if close to expected length (allow some tolerance)
-        const expectedMin = 28800;
-        const expectedMax = 28806; // Allow small variance
-        
-        if (dataStr.length < expectedMin || dataStr.length > expectedMax) {
-            console.warn(`[Parser] 3D Hex length: ${dataStr.length} (expected ~${expectedMin})`);
-            // Continue anyway for now
+        // 12-bit packed: 3 bytes (6 hex chars) = 2 pixels
+        // 9600 pixels = 4800 groups × 6 chars = 28800 chars ✓
+        if (dataStr.length !== 28800) {
+            console.error(`[Parser] 3D Hex CRITICAL: expected 28800 chars, got ${dataStr.length}`);
+            return;
         }
+
+        // LOG RAW DATA for verification
+        console.log('[3D RAW] First 120 hex chars of data (after header/checksum removal):');
+        console.log(dataStr.substring(0, 120));
+        console.log('[3D RAW] Last 120 hex chars of data:');
+        console.log(dataStr.substring(dataStr.length - 120));
 
         const totalPixels = 9600;
         const points = new Float32Array(totalPixels * 4);
         const distances = new Uint16Array(totalPixels);
         
-        for (let i = 0; i < totalPixels; i++) {
-            const hexChars = dataStr.substring(i * 3, i * 3 + 3);
-            const rawDist = parseInt(hexChars, 16);
-            const dist = (isNaN(rawDist) || rawDist >= 4080) ? 0 : rawDist;
+        let validCount = 0;
+        
+        // Process 2 pixels at a time (6 hex chars = 3 bytes)
+        for (let i = 0; i < totalPixels; i += 2) {
+            const hexStart = i * 3; // 3 hex chars per pixel
             
-            distances[i] = dist;
-            this.computePoint(i, dist, points);
+            // Read 6 hex chars (3 bytes)
+            const b0 = parseInt(dataStr.substring(hexStart, hexStart + 2), 16);
+            const b1 = parseInt(dataStr.substring(hexStart + 2, hexStart + 4), 16);
+            const b2 = parseInt(dataStr.substring(hexStart + 4, hexStart + 6), 16);
+            
+            // Pixel i (12 bits) - same as bitshift
+            const dist0 = (b0 << 4) | ((b1 & 0xF0) >> 4);
+            // Pixel i+1 (12 bits) - same as bitshift
+            const dist1 = ((b1 & 0x0F) << 8) | b2;
+            
+            // Debug first 5 groups (10 pixels)
+            if (i < 10) {
+                console.log(`[3D Debug] Pixels ${i}-${i+1}: bytes=${b0.toString(16).padStart(2,'0')}${b1.toString(16).padStart(2,'0')}${b2.toString(16).padStart(2,'0')} → dist0=${dist0}, dist1=${dist1}`);
+            }
+            
+            if (dist0 > 0 && dist0 < 4080) validCount++;
+            if (dist1 > 0 && dist1 < 4080) validCount++;
+            
+            distances[i] = dist0;
+            distances[i + 1] = dist1;
+            
+            this.computePoint(i, dist0, points);
+            this.computePoint(i + 1, dist1, points);
         }
         
-        console.log(`[Parser] 3D Hex Mode: ${totalPixels} pixels parsed`);
+        // COMPREHENSIVE DATA LOGGING
+        console.log('═══════════════════════════════════════════════════════');
+        console.log(`[Parser] 3D Hex Mode: ${totalPixels} pixels parsed, ${validCount} valid (non-zero, <4080)`);
+        
+        // Log sample distances
+        console.log('[3D Data] Sample distances (first 20 pixels):');
+        console.log(Array.from(distances.slice(0, 20)).join(', '));
+        
+        // Log sample 3D points
+        console.log('[3D Data] Sample 3D points (first 5):');
+        for (let i = 0; i < 5; i++) {
+            const idx = i * 4;
+            console.log(`  Pixel ${i}: x=${points[idx].toFixed(3)}, y=${points[idx+1].toFixed(3)}, z=${points[idx+2].toFixed(3)}, dist=${distances[i]}`);
+        }
+        
+        // Statistics
+        let minDist = Infinity, maxDist = 0, sumDist = 0;
+        for (let i = 0; i < totalPixels; i++) {
+            if (distances[i] > 0 && distances[i] < 4080) {
+                minDist = Math.min(minDist, distances[i]);
+                maxDist = Math.max(maxDist, distances[i]);
+                sumDist += distances[i];
+            }
+        }
+        const avgDist = validCount > 0 ? sumDist / validCount : 0;
+        console.log(`[3D Stats] Min: ${minDist}, Max: ${maxDist}, Avg: ${avgDist.toFixed(1)}`);
+        console.log(distances);
+        console.log('═══════════════════════════════════════════════════════');
+        
         this.on3D(points, distances);
     }
 
