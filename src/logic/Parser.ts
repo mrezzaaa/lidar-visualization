@@ -1,4 +1,3 @@
-import { distance } from 'three/tsl';
 import { tablex, tabley, tablez } from './Constants3D';
 
 export interface Point2D {
@@ -254,7 +253,7 @@ export class Parser {
                      this.parseInfo(packet);
                 }
             } else {
-                 // console.warn(`CS Fail (H2H). Type: ${firstHeaderType} Len: ${len}`);
+                 console.warn(`[Parser] Checksum FAILED (H2H). Type: ${firstHeaderType} Len: ${len}`);
                  // Legacy Force Parse
                  if (firstHeaderType === 1) {
                      // console.warn("Forcing 2D Parse (Legacy)");
@@ -307,7 +306,7 @@ export class Parser {
 
         // Discard data before first header
         if (first.idx > 0) {
-            console.log(`[Parser] Discarding ${first.idx} chars before ${first.type} header`);
+            // console.log(`[Parser] Discarding ${first.idx} chars before ${first.type} header`);
             this.hexBuffer = this.hexBuffer.slice(first.idx);
         }
 
@@ -322,7 +321,7 @@ export class Parser {
             }
             
             const packetString = this.hexBuffer.slice(0, FIXED_2D_LENGTH);
-            console.log(`[Parser] 2D FIXED-LENGTH EXTRACTED: ${FIXED_2D_LENGTH} chars`);
+            // console.log(`[Parser] 2D FIXED-LENGTH EXTRACTED: ${FIXED_2D_LENGTH} chars`);
             
             this.parse2DHex(packetString);
             this.hexBuffer = this.hexBuffer.slice(FIXED_2D_LENGTH);
@@ -341,7 +340,7 @@ export class Parser {
             }
             
             const packetString = this.hexBuffer.slice(0, FIXED_3D_LENGTH);
-            console.log(`[Parser] 3D FIXED-LENGTH EXTRACTED: ${FIXED_3D_LENGTH} chars`);
+            // console.log(`[Parser] 3D FIXED-LENGTH EXTRACTED: ${FIXED_3D_LENGTH} chars`);
             
             this.parse3DHex(packetString);
             this.hexBuffer = this.hexBuffer.slice(FIXED_3D_LENGTH);
@@ -371,14 +370,14 @@ export class Parser {
         const packetString = this.hexBuffer.slice(0, next.idx);
 
         // DETAILED LOGGING FOR USER VERIFICATION
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        console.log(`[Parser] PACKET EXTRACTED (${first.type})`);
-        console.log(`  ┌─ Start: ${first.type} header at position 0`);
-        console.log(`  ├─ End: ${next.type} header at position ${next.idx}`);
-        console.log(`  ├─ Total length: ${packetString.length} chars (${packetString.length / 2} bytes)`);
-        console.log(`  ├─ First 60 chars: ${packetString.substring(0, 60)}`);
-        console.log(`  └─ Last 60 chars: ${packetString.substring(packetString.length - 60)}`);
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        // console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+        // console.log(`[Parser] PACKET EXTRACTED (${first.type})`);
+        // console.log(`  ┌─ Start: ${first.type} header at position 0`);
+        // console.log(`  ├─ End: ${next.type} header at position ${next.idx}`);
+        // console.log(`  ├─ Total length: ${packetString.length} chars (${packetString.length / 2} bytes)`);
+        // console.log(`  ├─ First 60 chars: ${packetString.substring(0, 60)}`);
+        // console.log(`  └─ Last 60 chars: ${packetString.substring(packetString.length - 60)}`);
+        // console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
         // Phase 5: Parse packet based on type
         if (first.type === 'INFO') this.parseInfoHex(packetString);
@@ -440,8 +439,18 @@ export class Parser {
     }
 
     private computePoint(idx: number, dist: number, points: Float32Array) {
-        // TEMPORARILY RELAXED for debugging - accept any non-zero distance
-        if (dist === 0 || dist > 4090) { // Only reject 0 or clearly invalid
+        // Sensor spec: 50mm - 2000mm valid range
+        // 3D Error codes: 4080-4095 (0xFF0-0xFFF) indicate errors/out-of-range
+        const MIN_RANGE = 50;
+        const MAX_RANGE = 2000;
+        const ERROR_CODE_MIN = 4080; // 0xFF0
+        
+        // Reject if:
+        // 1. Zero (no measurement)
+        // 2. Below minimum range
+        // 3. Above maximum range  
+        // 4. Error code range (4080-4095)
+        if (dist === 0 || dist < MIN_RANGE || dist > MAX_RANGE || dist >= ERROR_CODE_MIN) {
              points[idx*4] = 0;
              points[idx*4+1] = 0;
              points[idx*4+2] = 0;
@@ -501,7 +510,7 @@ export class Parser {
          }
          
          this.on2D(points);
-         console.log("[Parser] 2D BitShift - Points:", points.length);
+         // console.log("[Parser] 2D BitShift - Points:", points.length);
     }
     
     private parse2DHexString(pkt: Uint8Array, payloadLen: number) {
@@ -512,7 +521,7 @@ export class Parser {
          // Convert packet to hex string
          const hexData = Array.from(pkt).map(b => b.toString(16).padStart(2, '0')).join('');
          
-         console.log(`[Parser HexString] Packet hex (first 40): ${hexData.substring(0, 40)}...`);
+         // console.log(`[Parser HexString] Packet hex (first 40): ${hexData.substring(0, 40)}...`);
          
          // Remove header "5a77ff430101" (12 hex chars = 6 bytes)
          const dataWithoutHeader = hexData.substring(12);
@@ -520,7 +529,7 @@ export class Parser {
          // Remove checksum (last 2 hex chars)
          const dataOnly = dataWithoutHeader.substring(0, dataWithoutHeader.length - 2);
          
-         console.log(`[Parser HexString] Data length: ${dataOnly.length} hex chars, Expected: ${160 * 4} for 160 points`);
+         // console.log(`[Parser HexString] Data length: ${dataOnly.length} hex chars, Expected: ${160 * 4} for 160 points`);
          
          const points: Point2D[] = [];
          const errorCodes = [16000, 16001, 16002, 16003, 16004];
@@ -555,7 +564,7 @@ export class Parser {
          }
          
          this.on2D(points);
-         console.log(`[Parser] 2D HexString - Valid points: ${points.length} / ${Math.floor(dataOnly.length / 4)} total`);
+         // console.log(`[Parser] 2D HexString - Valid points: ${points.length} / ${Math.floor(dataOnly.length / 4)} total`);
     }
 
     /**
@@ -679,8 +688,13 @@ export class Parser {
                 console.log(`[3D Debug] Pixels ${i}-${i+1}: bytes=${b0.toString(16).padStart(2,'0')}${b1.toString(16).padStart(2,'0')}${b2.toString(16).padStart(2,'0')} → dist0=${dist0}, dist1=${dist1}`);
             }
             
-            if (dist0 > 0 && dist0 < 4080) validCount++;
-            if (dist1 > 0 && dist1 < 4080) validCount++;
+            // Count only distances within sensor spec range (50-2000mm)
+            const MIN_RANGE = 50;
+            const MAX_RANGE = 2000;
+            const ERROR_CODE_MIN = 4080;
+            
+            if (dist0 >= MIN_RANGE && dist0 <= MAX_RANGE && dist0 < ERROR_CODE_MIN) validCount++;
+            if (dist1 >= MIN_RANGE && dist1 <= MAX_RANGE && dist1 < ERROR_CODE_MIN) validCount++;
             
             distances[i] = dist0;
             distances[i + 1] = dist1;
@@ -718,6 +732,7 @@ export class Parser {
         console.log(distances);
         console.log('═══════════════════════════════════════════════════════');
         
+        console.log(`[Parser] 3D Hex: ${validCount}/${totalPixels} valid points parsed`);
         this.on3D(points, distances);
     }
 

@@ -78,9 +78,9 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
             this.update3DPoints();
         }
         
-        // Update mesh mode
-        if (prevProps.meshMode !== this.props.meshMode && this.points3D) {
-            this.points3D.visible = this.props.meshMode;
+        // Update mesh mode (if needed for future mesh rendering)
+        if (prevProps.meshMode !== this.props.meshMode) {
+            // meshMode logic here if needed
         }
         
         // Update SLAM points - check length change since array reference stays same
@@ -133,7 +133,7 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
             0.1,
             100
         );
-        this.camera.position.set(3, 3, 3);
+        this.camera.position.set(10, 10, 10);
         this.camera.lookAt(0, 0, 0);
 
         // Renderer
@@ -211,9 +211,9 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
         const col3D = new Float32Array(MAX_3D * 3);
         this.geometry3D.setAttribute('position', new THREE.BufferAttribute(pos3D, 3));
         this.geometry3D.setAttribute('color', new THREE.BufferAttribute(col3D, 3));
-        const mat3D = new THREE.PointsMaterial({ size: 0.02, vertexColors: true });
+        const mat3D = new THREE.PointsMaterial({ size: 0.05, vertexColors: true }); // Increased size for visibility
         this.points3D = new THREE.Points(this.geometry3D, mat3D);
-        this.points3D.visible = false;
+        this.points3D.visible = true; // Show 3D points when data exists
         this.scene.add(this.points3D);
 
         // Animation loop
@@ -459,6 +459,12 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
         this.geometry3D.attributes.color.needsUpdate = true;
         this.geometry3D.setDrawRange(0, validCount);
         this.geometry3D.computeBoundingSphere();
+        
+        console.log(`[LidarViewer] 3D points updated: ${validCount} valid points rendered`);
+        // Ensure points are visible when we have data
+        if (this.points3D && validCount > 0) {
+            this.points3D.visible = true;
+        }
     }
     
     private handleResetView = () => {
@@ -479,7 +485,7 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
         this.camera.right = frustumSize * aspect / 2;
         this.camera.top = frustumSize / 2;
         this.camera.bottom = frustumSize / -2;
-        this.camera.position.set(3, 3, 3);
+        this.camera.position.set(1.5, 1.5, 1.5);
         this.camera.lookAt(0, 0, 0);
         this.camera.zoom = 1;
         this.camera.updateProjectionMatrix();
