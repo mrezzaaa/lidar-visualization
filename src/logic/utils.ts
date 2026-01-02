@@ -64,7 +64,7 @@ export const CMD = {
     pulse3D_5ms:   createCommand(0x0C, [0x01, 0x13, 0x88]),  // Fixed 5000μs (5ms) - stronger signal
     pulse3D_10ms:  createCommand(0x0C, [0x01, 0x27, 0x10]),  // Fixed 10000μs (10ms) - maximum!
     frequencyCh0:  createCommand(0x0F, [0x00]),              // Frequency channel 0
-    sensitivity:   createCommand(0x11, [0x64]),              // Sensitivity = 100 (0x64) - MAXIMUM!
+    sensitivity:   createCommand(0x11, [0x14]),              // Sensitivity = 20 (0x14) - Default
     
     // Baud Rate Change Commands (0x12) - NEW FORMAT (F/W >= 0.2.4)
     // Format: 0x5A 0x77 0xFF 0x02 0x00 0x12 [BAUD_CODE] [CHECKSUM]
