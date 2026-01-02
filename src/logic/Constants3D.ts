@@ -64,7 +64,7 @@ export function initDistortion3D() {
             tablez[exactIdx] = z_val;
         }
     }
-    console.log("Distortion tables initialized");
+    // console.log("Distortion tables initialized");
 }
 
 // Initialize on load

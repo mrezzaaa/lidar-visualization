@@ -16,7 +16,7 @@ export class SerialHandler {
 
     setHexMode(enabled: boolean) {
         this.convertToHex = enabled;
-        console.log(`[Serial] Hex conversion mode: ${enabled}`);
+        // console.log(`[Serial] Hex conversion mode: ${enabled}`);
     }
 
     async connect(baudRate: number = 3000000): Promise<boolean> {

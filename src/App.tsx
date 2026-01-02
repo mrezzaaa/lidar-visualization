@@ -70,7 +70,7 @@ function App() {
             // Apply Filters to 2D Data before setting state
             if (latest2D.current) {
                 let filtered = latest2D.current;
-                console.log(`[App] Received ${filtered.length} points from parser. Filter: ${filterMode}`);
+                // console.log(`[App] Received ${filtered.length} points from parser. Filter: ${filterMode}`);
                 
                 // Note: Only apply filters if we have enough points
                 if (filtered.length > 10) {
@@ -83,19 +83,19 @@ function App() {
                     }
                 }
                 
-                console.log(`[App] After filter: ${filtered.length} points. Setting state.`);
+                // console.log(`[App] After filter: ${filtered.length} points. Setting state.`);
                 setPoints2D(filtered);
                 
                 // Add filtered points to SLAM if mapping is active (use ref not state to avoid closure issues)
                 const isSlamActive = slamRef.current.isActive();
-                console.log('[App] SLAM isActive:', isSlamActive, 'filtered points:', filtered.length);
+                // console.log('[App] SLAM isActive:', isSlamActive, 'filtered points:', filtered.length);
                 if (isSlamActive) {
                     slamRef.current.addScan(filtered);
-                    const totalSlamPoints = slamRef.current.getPointCount();
-                    console.log('[App] Added to SLAM. Total accumulated:', totalSlamPoints);
+                    // const totalSlamPoints = slamRef.current.getPointCount();
+                    // console.log('[App] Added to SLAM. Total accumulated:', totalSlamPoints);
                     // Force re-render by updating trigger
                     setSlamUpdateTrigger(prev => {
-                        console.log('[App] slamUpdateTrigger:', prev, '->', prev + 1);
+                        // console.log('[App] slamUpdateTrigger:', prev, '->', prev + 1);
                         return prev + 1;
                     });
                 }
@@ -135,7 +135,7 @@ function App() {
   useEffect(() => {
     if (parserRef.current) {
       parserRef.current.setParserMode(parserMode);
-      console.log('[App] Parser mode changed to:', parserMode);
+      // console.log('[App] Parser mode changed to:', parserMode);
     }
     // Also update SerialHandler to convert data at read level
     serialRef.current.setHexMode(parserMode === 'hexstring');
@@ -157,8 +157,8 @@ function App() {
 
   const handleCommand = async (cmd: Uint8Array) => {
     // Log command being sent
-    const hexString = Array.from(cmd).map(b => b.toString(16).padStart(2, '0')).join(' ');
-    console.log(`[Serial] Sending command: 0x${hexString}`);
+    // const hexString = Array.from(cmd).map(b => b.toString(16).padStart(2, '0')).join(' ');
+    // console.log(`[Serial] Sending command: 0x${hexString}`);
     await serialRef.current.send(cmd);
   };
 
@@ -228,24 +228,24 @@ function App() {
       return;
     }
 
-    console.log(`[App] Changing baud rate to ${newBaud}...`);
+    // console.log(`[App] Changing baud rate to ${newBaud}...`);
     
     try {
-      console.log('[App] Step 1: Sending SET_BAUDRATE command...');
+      // console.log('[App] Step 1: Sending SET_BAUDRATE command...');
       await serialRef.current.send(baudCmd);
       
-      console.log('[App] Step 2: Waiting for sensor...');
+      // console.log('[App] Step 2: Waiting for sensor...');
       await new Promise(resolve => setTimeout(resolve, 500));
       
-      console.log('[App] Step 3: Disconnecting...');
+      // console.log('[App] Step 3: Disconnecting...');
       await handleDisconnect();
       
       await new Promise(resolve => setTimeout(resolve, 300));
       
-      console.log(`[App] Step 4: Reconnecting with baud ${newBaud}...`);
+      // console.log(`[App] Step 4: Reconnecting with baud ${newBaud}...`);
       await handleConnect(newBaud);
       
-      console.log('[App] Baud rate changed successfully');
+      // console.log('[App] Baud rate changed successfully');
     } catch (error) {
       console.error('[App] Failed to change baud rate:', error);
       alert(`Failed to change baud rate: ${error}`);

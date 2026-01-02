@@ -40,7 +40,7 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
     }
     
     componentDidMount() {
-        console.log('[LidarViewer] componentDidMount called');
+        // console.log('[LidarViewer] componentDidMount called');
         this.initThreeJS();
         
         // Wire mouse move listener for point hover
@@ -50,7 +50,7 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
     }
     
     componentWillUnmount() {
-        console.log('[LidarViewer] componentWillUnmount called');
+        // console.log('[LidarViewer] componentWillUnmount called');
         
         // Remove mouse listener
         if (this.renderer) {
@@ -87,10 +87,10 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
         const prevSlamCount = prevProps.slamPoints.length;
         const currentSlamCount = this.props.slamPoints.length;
         
-        console.log('[LidarViewer] componentDidUpdate - SLAM points:', currentSlamCount, 'prev:', prevSlamCount);
+        // console.log('[LidarViewer] componentDidUpdate - SLAM points:', currentSlamCount, 'prev:', prevSlamCount);
         
         if (currentSlamCount > 0 && currentSlamCount !== prevSlamCount) {
-            console.log('[LidarViewer] Updating SLAM with', currentSlamCount, 'points');
+            // console.log('[LidarViewer] Updating SLAM with', currentSlamCount, 'points');
             this.updateSlamPoints();
         } else if (currentSlamCount === 0 && this.slamCloud) {
             // Hide SLAM cloud when no points
@@ -103,18 +103,18 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
         
         // Guard against double initialization  
         if (this.scene !== null) {
-            console.log('[LidarViewer] Already initialized, skipping');
+            // console.log('[LidarViewer] Already initialized, skipping');
             return;
         }
         
         // CRITICAL: Remove ALL existing canvases from mount point
         const existingCanvases = this.mountRef.current.querySelectorAll('canvas');
-        console.log(`[LidarViewer] Found ${existingCanvases.length} existing canvas(es), removing...`);
+        // console.log(`[LidarViewer] Found ${existingCanvases.length} existing canvas(es), removing...`);
         existingCanvases.forEach(canvas => {
             canvas.remove();
         });
         
-        console.log('[LidarViewer] Initializing Three.js (Class Component)');
+        // console.log('[LidarViewer] Initializing Three.js (Class Component)');
         
         // Scene
         this.scene = new THREE.Scene();
@@ -141,7 +141,7 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
         this.renderer.setSize(width, height);
         this.mountRef.current.appendChild(this.renderer.domElement);
         
-        console.log('[LidarViewer] Canvas created. Total canvases:', document.querySelectorAll('canvas').length);
+        // console.log('[LidarViewer] Canvas created. Total canvases:', document.querySelectorAll('canvas').length);
 
         // Controls
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -158,7 +158,7 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
         (window as any).threeRenderer = this.renderer;
         (window as any).threeScene = this.scene;
         
-        console.log('[LidarViewer] OrbitControls initialized');
+        // console.log('[LidarViewer] OrbitControls initialized');
 
         // Grid
         const grid = new THREE.GridHelper(10, 20, 0x444444, 0x222222);
@@ -211,7 +211,7 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
         const col3D = new Float32Array(MAX_3D * 3);
         this.geometry3D.setAttribute('position', new THREE.BufferAttribute(pos3D, 3));
         this.geometry3D.setAttribute('color', new THREE.BufferAttribute(col3D, 3));
-        const mat3D = new THREE.PointsMaterial({ size: 0.05, vertexColors: true }); // Increased size for visibility
+        const mat3D = new THREE.PointsMaterial({ size: 2, vertexColors: true }); // Increased size for visibility
         this.points3D = new THREE.Points(this.geometry3D, mat3D);
         this.points3D.visible = true; // Show 3D points when data exists
         this.scene.add(this.points3D);
@@ -351,7 +351,7 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
         this.slamCloud = new THREE.Points(this.slamGeometry, material);
         this.scene.add(this.slamCloud);
         
-        console.log('[LidarViewer] SLAM point cloud initialized');
+        // console.log('[LidarViewer] SLAM point cloud initialized');
     }
     
     private updateSlamPoints() {
@@ -363,7 +363,7 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
         const slamPoints = this.props.slamPoints;
         const numPoints = Math.min(slamPoints.length, 50000); // Cap at max
         
-        console.log('[LidarViewer] updateSlamPoints called with', numPoints, 'points');
+        // console.log('[LidarViewer] updateSlamPoints called with', numPoints, 'points');
         
         if (numPoints === 0) return;
         
@@ -389,7 +389,7 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
         
         if (this.slamCloud) {
             this.slamCloud.visible = true;
-            console.log('[LidarViewer] SLAM cloud set to visible with', numPoints, 'points');
+            // console.log('[LidarViewer] SLAM cloud set to visible with', numPoints, 'points');
         }
     }
     
@@ -409,7 +409,7 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
             const p = this.props.points2D[i];
             
             positions[i*3] = p.x;
-            positions[i*3+1] = 0.05;
+            positions[i*3+1] = 0; // Flat on the grid (was 0.05)
             positions[i*3+2] = p.z;
             
             colors[i*3] = 1;     // Red
@@ -460,7 +460,7 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
         this.geometry3D.setDrawRange(0, validCount);
         this.geometry3D.computeBoundingSphere();
         
-        console.log(`[LidarViewer] 3D points updated: ${validCount} valid points rendered`);
+        // console.log(`[LidarViewer] 3D points updated: ${validCount} valid points rendered`);
         // Ensure points are visible when we have data
         if (this.points3D && validCount > 0) {
             this.points3D.visible = true;
@@ -468,7 +468,7 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
     }
     
     private handleResetView = () => {
-        console.log('[LidarViewer] Reset View clicked');
+        // console.log('[LidarViewer] Reset View clicked');
         if (!this.camera || !this.controls || !this.mountRef.current) {
             console.warn('[LidarViewer] Reset View: refs not available');
             return;
@@ -479,7 +479,7 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
         const aspect = width / height;
         const frustumSize = 10;
         
-        console.log('[LidarViewer] Before reset - Position:', this.camera.position, 'Zoom:', this.camera.zoom);
+        // console.log('[LidarViewer] Before reset - Position:', this.camera.position, 'Zoom:', this.camera.zoom);
         
         this.camera.left = frustumSize * aspect / -2;
         this.camera.right = frustumSize * aspect / 2;
@@ -497,8 +497,8 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
             this.renderer.render(this.scene, this.camera);
         }
         
-        console.log('[LidarViewer] After reset - Position:', this.camera.position, 'Zoom:', this.camera.zoom);
-        console.log('[LidarViewer] Reset View complete');
+        // console.log('[LidarViewer] After reset - Position:', this.camera.position, 'Zoom:', this.camera.zoom);
+        // console.log('[LidarViewer] Reset View complete');
     };
     
     render() {

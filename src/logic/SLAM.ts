@@ -11,7 +11,7 @@ export class SLAM {
     
     constructor(config: SLAMConfig) {
         this.maxPoints = config.maxPoints;
-        console.log(`[SLAM] Initialized with max ${config.maxPoints} points`);
+        // console.log(`[SLAM] Initialized with max ${config.maxPoints} points`);
     }
     
     addScan(points: Point2D[]) {
@@ -37,17 +37,17 @@ export class SLAM {
     
     reset() {
         this.accumulatedPoints = [];
-        console.log('[SLAM] Map reset');
+        // console.log('[SLAM] Map reset');
     }
     
     start() {
         this.isMapping = true;
-        console.log('[SLAM] Mapping started');
+        // console.log('[SLAM] Mapping started');
     }
     
     stop() {
         this.isMapping = false;
-        console.log('[SLAM] Mapping stopped - accumulated', this.accumulatedPoints.length, 'points');
+        // console.log('[SLAM] Mapping stopped - accumulated', this.accumulatedPoints.length, 'points');
     }
     
     isActive(): boolean {

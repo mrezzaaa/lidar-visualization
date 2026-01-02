@@ -36,7 +36,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
     slamActive, onStartMapping, onStopMapping, onResetMap, slamPostprocessing, onSlamPostprocessingChange
 }) => {
     const [scanMode, setScanMode] = React.useState<'2D' | '3D' | 'Dual'>('2D');
-    const [baudRate, setBaudRate] = React.useState(3000000);
+    const [baudRate, setBaudRate] = React.useState(() => {
+        // Initialize from localStorage or default to 3000000
+        const saved = localStorage.getItem('lidar_baud_rate');
+        return saved ? parseInt(saved) : 3000000;
+    });
     const [showBaudModal, setShowBaudModal] = React.useState(false);
     const [sensitivity, setSensitivity] = React.useState(20);
     const [frequencyChannel, setFrequencyChannel] = React.useState(0);
@@ -60,7 +64,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const handleStart = async () => {
         // For 3D mode, send setup commands first
         if (scanMode === '3D') {
-            console.log('[Sidebar] Setting up 3D mode with LONG PULSE (10ms)...');
+            // console.log('[Sidebar] Setting up 3D mode with LONG PULSE (10ms)...');
             
             // Send setup sequence with delays
             await onCommand(CMD.pulse3D_10ms);       // 1. Set pulse to 10ms (maximum) for stronger signal
@@ -72,7 +76,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             await onCommand(CMD.sensitivity);        // 3. Set sensitivity to 20
             await new Promise(r => setTimeout(r, 150));
             
-            console.log('[Sidebar] 3D setup complete (10ms pulse), starting scan...');
+            // console.log('[Sidebar] 3D setup complete (10ms pulse), starting scan...');
             await onCommand(CMD.scan3D);             // 4. Start 3D scan
         }
         else if (scanMode === '2D') {
@@ -88,7 +92,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="p-4 border-b border-gray-800">
                 <h1 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent flex items-center gap-2">
                     <Activity className="w-6 h-6 text-blue-400" />
-                    CygLiDAR Direct
+                    CygLiDAR Web Serial by <a href="https://github.com/mrezzaaa" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">mrezzaaa</a>
                 </h1>
             </div>
 
@@ -99,7 +103,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <div className="space-y-2">
                         <select 
                             value={baudRate} 
-                            onChange={(e) => setBaudRate(Number(e.target.value))}
+                            onChange={(e) => {
+                                const newBaud = Number(e.target.value);
+                                setBaudRate(newBaud);
+                                localStorage.setItem('lidar_baud_rate', newBaud.toString());
+                            }}
                             className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                             disabled={isConnected}
                         >
@@ -125,7 +133,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 className="w-full px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded font-medium"
                                 onClick={() => setShowBaudModal(true)}
                             >
-                                ⚡ Change Baud Rate
+                                Change Baud Rate
                             </button>
                         )}
                     </div>
@@ -371,7 +379,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             onClick={onResetMap}
                             className="col-span-2 py-2 bg-red-600 hover:bg-red-500 text-white rounded text-sm"
                         >
-                            🗑 Reset Map
+                        Reset Map
                         </button>
                     </div>
                     <div className="text-xs text-gray-500">
@@ -396,7 +404,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         disabled={!isConnected}
                         title="Generate test flat depth grid at 1500mm"
                     >
-                            🧪 Test Flat Grid (1500mm)
+                        Test Flat Grid (1500mm)
                     </button>
                     
                     {/* View Depth Matrix Button */}
@@ -406,7 +414,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         disabled={!isConnected}
                         title="View full 160×60 depth matrix"
                     >
-                        📊 View Depth Matrix
+                        View Depth Matrix
                     </button>
                         <button 
                             onClick={onExportCSV}
@@ -442,18 +450,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {showBaudModal && (
                 <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50">
                     <div className="bg-gray-800 border border-gray-600 rounded-lg p-6 w-80">
-                        <h3 className="text-white font-bold mb-4">⚡ Change Baud Rate</h3>
+                        <h3 className="text-white font-bold mb-4">Change Baud Rate</h3>
                         <div className="space-y-2">
                             {[3000000, 250000, 115200, 57600].map(baud => (
                                 <button
                                     key={baud}
                                     className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
                                     onClick={() => {
+                                        onChangeBaudRate(baud); 
                                         setShowBaudModal(false);
-                                        onChangeBaudRate(baud);
+                                        // Update state and save to localStorage
+                                        setBaudRate(baud);
+                                        localStorage.setItem('lidar_baud_rate', baud.toString());
                                     }}
                                 >
-                                    {baud.toLocaleString()} bps
+                                    Set to {baud.toLocaleString()} bps
                                 </button>
                             ))}
                         </div>

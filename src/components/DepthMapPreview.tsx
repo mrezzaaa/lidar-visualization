@@ -1,9 +1,41 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 interface DepthMapPreviewProps {
     depthData: Uint16Array | null;
     width?: number;
     height?: number;
+}
+
+type ColorMode = 'grayscale' | 'hue';
+
+/**
+ * Converts HSL to RGB. 
+ * h, s, l are in [0, 1].
+ * Returns [r, g, b] in [0, 255].
+ */
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+    let r, g, b;
+
+    if (s === 0) {
+        r = g = b = l; // achromatic
+    } else {
+        const hue2rgb = (p: number, q: number, t: number) => {
+            if (t < 0) t += 1;
+            if (t > 1) t -= 1;
+            if (t < 1/6) return p + (q - p) * 6 * t;
+            if (t < 1/2) return q;
+            if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+            return p;
+        };
+
+        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        const p = 2 * l - q;
+        r = hue2rgb(p, q, h + 1/3);
+        g = hue2rgb(p, q, h);
+        b = hue2rgb(p, q, h - 1/3);
+    }
+
+    return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
 }
 
 export const DepthMapPreview: React.FC<DepthMapPreviewProps> = ({ 
@@ -12,6 +44,7 @@ export const DepthMapPreview: React.FC<DepthMapPreviewProps> = ({
     height = 120  // 2x scale of 60
 }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const [colorMode, setColorMode] = useState<ColorMode>('grayscale');
 
     useEffect(() => {
         if (!canvasRef.current || !depthData) return;
@@ -27,7 +60,7 @@ export const DepthMapPreview: React.FC<DepthMapPreviewProps> = ({
         const imageData = ctx.createImageData(GRID_WIDTH, GRID_HEIGHT);
         const data = imageData.data;
 
-        // Convert depth values to grayscale
+        // Convert depth values to color
         // ONLY map 50-2000mm range, everything else = black
         const MIN_DEPTH = 50;
         const MAX_DEPTH = 2000;
@@ -37,11 +70,22 @@ export const DepthMapPreview: React.FC<DepthMapPreviewProps> = ({
             
             let r = 0, g = 0, b = 0;
             
-            // Valid range: 50-2000mm → grayscale (white=close, black=far)
+            // Valid range: 50-2000mm
             if (depth >= MIN_DEPTH && depth <= MAX_DEPTH) {
                 const normalized = (depth - MIN_DEPTH) / (MAX_DEPTH - MIN_DEPTH);
-                const gray = Math.floor((1 - normalized) * 255); // Invert: close=white, far=black
-                r = g = b = gray;
+                
+                if (colorMode === 'grayscale') {
+                    // Grayscale: White=Close, Black=Far
+                    const gray = Math.floor((1 - normalized) * 255);
+                    r = g = b = gray;
+                } else {
+                    // Hue: Red (0)=Close, Blue (0.66)=Far
+                    // We map 0..1 dist to 0..0.7 Hue (Red->Orange->Yellow->Green->Blue)
+                    const h = (1 - normalized) * 0.7; // 0.7 = Blue-ish, 0 = Red
+                    const s = 1.0;
+                    const l = 0.5;
+                    [r, g, b] = hslToRgb(h, s, l);
+                }
             }
             // Everything else (< 50, > 2000, error codes) → black
             else {
@@ -57,8 +101,8 @@ export const DepthMapPreview: React.FC<DepthMapPreviewProps> = ({
         // Draw at native resolution first
         ctx.putImageData(imageData, 0, 0);
 
-        // Then scale up using nearest-neighbor (pixelated look)
-        ctx.imageSmoothingEnabled = false;
+        // Then scale up using interpolation (smoother look)
+        ctx.imageSmoothingEnabled = true;
         
         // Create temporary canvas for scaling
         const tempCanvas = document.createElement('canvas');
@@ -72,16 +116,32 @@ export const DepthMapPreview: React.FC<DepthMapPreviewProps> = ({
         // Clear main canvas and draw scaled
         canvas.width = width;
         canvas.height = height;
-        ctx.imageSmoothingEnabled = false;
+        ctx.imageSmoothingEnabled = true;
         ctx.drawImage(tempCanvas, 0, 0, GRID_WIDTH, GRID_HEIGHT, 0, 0, width, height);
 
-    }, [depthData, width, height]);
+    }, [depthData, width, height, colorMode]);
 
     return (
         <div className="space-y-2">
             <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-500 uppercase tracking-wider">Depth Map Preview</span>
-                <span className="text-xs text-gray-600">160×60</span>
+                <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-500 uppercase tracking-wider">Depth Map Preview</span>
+                    <span className="text-[10px] text-gray-600 font-mono">320×120</span>
+                </div>
+                <div className="flex bg-gray-800 rounded p-0.5">
+                    <button
+                        onClick={() => setColorMode('grayscale')}
+                        className={`text-[10px] px-2 py-0.5 rounded ${colorMode === 'grayscale' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+                    >
+                        Gray
+                    </button>
+                    <button
+                        onClick={() => setColorMode('hue')}
+                        className={`text-[10px] px-2 py-0.5 rounded ${colorMode === 'hue' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-gray-200'}`}
+                    >
+                        Hue
+                    </button>
+                </div>
             </div>
             <div className="border border-gray-700 rounded overflow-hidden bg-black">
                 <canvas 
@@ -89,12 +149,12 @@ export const DepthMapPreview: React.FC<DepthMapPreviewProps> = ({
                     width={width} 
                     height={height}
                     className="w-full"
-                    style={{ imageRendering: 'pixelated' }}
+                    style={{ imageRendering: 'auto' }}
                 />
             </div>
             <div className="flex justify-between text-xs text-gray-600">
-                <span>Close (white)</span>
-                <span>Far (black)</span>
+                <span>{colorMode === 'grayscale' ? 'Close (white)' : 'Close (blue)'}</span>
+                <span>{colorMode === 'grayscale' ? 'Far (black)' : 'Far (red)'}</span>
             </div>
         </div>
     );

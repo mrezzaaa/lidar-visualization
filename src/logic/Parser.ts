@@ -1,4 +1,4 @@
-import { tablex, tabley, tablez } from './Constants3D';
+
 
 export interface Point2D {
     x: number;
@@ -43,7 +43,7 @@ export class Parser {
     }
 
     setParserMode(mode: ParserMode) {
-        console.log(`[Parser] Mode changing: ${this.parserMode} → ${mode}`);
+        // console.log(`[Parser] Mode changing: ${this.parserMode} → ${mode}`);
         this.parserMode = mode;
     }
 
@@ -52,9 +52,9 @@ export class Parser {
      * This tests the depth camera projection without real sensor data
      */
     generateTestFlatGrid() {
-        console.log('╔═══════════════════════════════════════════════════════╗');
-        console.log('║       TEST: Generating Flat Depth Grid (1500mm)      ║');
-        console.log('╚═══════════════════════════════════════════════════════╝');
+        // console.log('╔═══════════════════════════════════════════════════════╗');
+        // console.log('║       TEST: Generating Flat Depth Grid (1500mm)      ║');
+        // console.log('╚═══════════════════════════════════════════════════════╝');
 
         const GRID_WIDTH = 160;
         const GRID_HEIGHT = 60;
@@ -71,7 +71,7 @@ export class Parser {
         }
 
         // Log sample points for verification
-        console.log('\n[Test Grid] Sample 3D coordinates:');
+        // console.log('\n[Test Grid] Sample 3D coordinates:');
         for (let row = 0; row < 3; row++) {
             const samples = [];
             for (let col = 0; col < 5; col++) {
@@ -81,11 +81,11 @@ export class Parser {
                 const z = points[idx * 4 + 2].toFixed(3);
                 samples.push(`R${row}C${col}:(${x},${y},${z})`);
             }
-            console.log('  ' + samples.join(' | '));
+            // console.log('  ' + samples.join(' | '));
         }
 
-        console.log('\n[Test Grid] Expected: Flat rectangular grid at Z ≈ -1.5m');
-        console.log('═══════════════════════════════════════════════════════\n');
+        // console.log('\n[Test Grid] Expected: Flat rectangular grid at Z ≈ -1.5m');
+        // console.log('═══════════════════════════════════════════════════════\n');
 
         // Send to visualization
         this.on3D(points, distances);
@@ -108,7 +108,7 @@ export class Parser {
             
             // Log small packets (likely INFO responses)
             if (data.length < 20) {
-                console.log('[Parser] RX:', Array.from(data).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+                // console.log('[Parser] RX:', Array.from(data).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
             }
             
             this.processBuffer();
@@ -156,7 +156,7 @@ export class Parser {
             
             // Debug: if no header found and we have data, log it
             if (firstHeaderIdx === -1 && this.buffer.length > 0 && this.buffer.length < 50) {
-                console.log('[Parser] No header match. Buffer:', Array.from(this.buffer.slice(0, Math.min(20, this.buffer.length))).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+                // console.log('[Parser] No header match. Buffer:', Array.from(this.buffer.slice(0, Math.min(20, this.buffer.length))).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
             }
 
             if (firstHeaderIdx === -1) {
@@ -177,11 +177,11 @@ export class Parser {
 
             // Special case: INFO packet is fixed length (13 bytes total)
             if (firstHeaderType === 16) {
-                console.log('[Parser] INFO header detected!');
+                // console.log('[Parser] INFO header detected!');
                 const infoPacketLength = 13;
                 if (this.buffer.length >= infoPacketLength) {
                     const packet = this.buffer.slice(0, infoPacketLength);
-                    console.log('[Parser] INFO packet full:', Array.from(packet).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+                    // console.log('[Parser] INFO packet full:', Array.from(packet).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
                     
                     // Validate checksum
                     const len = packet.length;
@@ -191,11 +191,11 @@ export class Parser {
                         calcCS ^= packet[i];
                     }
                     
-                    console.log('[Parser] Checksum - Received:', '0x' + receivedCS.toString(16), 'Calculated:', '0x' + calcCS.toString(16));
+                    // console.log('[Parser] Checksum - Received:', '0x' + receivedCS.toString(16), 'Calculated:', '0x' + calcCS.toString(16));
                     
                     if (calcCS === receivedCS) {
                         this.frames++;
-                        console.log('[Parser] Checksum OK - calling parseInfo()');
+                        // console.log('[Parser] Checksum OK - calling parseInfo()');
                         this.parseInfo(packet);
                     } else {
                         console.warn('[Parser] Checksum FAILED for INFO packet');
@@ -205,7 +205,7 @@ export class Parser {
                     this.buffer = this.buffer.slice(infoPacketLength);
                     continue;
                 } else {
-                    console.log('[Parser] Waiting for complete INFO packet. Have:', this.buffer.length, 'Need: 13');
+                    // console.log('[Parser] Waiting for complete INFO packet. Have:', this.buffer.length, 'Need: 13');
                     // Wait for complete INFO packet
                     return;
                 }
@@ -447,7 +447,10 @@ export class Parser {
 
         // 9600 pixels (160x60)
         // Output format: Float32Array [x, y, z, c, x, y, z, c, ...]
-        const totalPixels = 160 * 60;
+        const GRID_WIDTH = 160;
+        const GRID_HEIGHT = 60;
+        const totalPixels = GRID_WIDTH * GRID_HEIGHT;
+        
         const points = new Float32Array(totalPixels * 4); 
         const distances = new Uint16Array(totalPixels);
 
@@ -465,16 +468,16 @@ export class Parser {
             const b1 = pkt[dataIndex+1];
             const b2 = pkt[dataIndex+2];
             
-            // Pixel i (12 bits)
+            // Pixel i (12 bits) - Matches parse3DHex logic
             const dist0 = (b0 << 4) | ((b1 & 0xF0) >> 4);
-            // Pixel i+1 (12 bits)
+            // Pixel i+1 (12 bits) - Matches parse3DHex logic
             const dist1 = ((b1 & 0x0F) << 8) | b2;
             
             distances[i] = dist0;
             distances[i+1] = dist1;
 
-            this.computePoint(i, dist0, points);
-            this.computePoint(i+1, dist1, points);
+            this.computePointDepthCamera(i, dist0, GRID_WIDTH, GRID_HEIGHT, points);
+            this.computePointDepthCamera(i+1, dist1, GRID_WIDTH, GRID_HEIGHT, points);
             
             dataIndex += 3;
         }
@@ -485,41 +488,7 @@ export class Parser {
     /**
      * Legacy: Compute 3D point using lookup tables (for bitshift mode)
      */
-    private computePoint(idx: number, dist: number, points: Float32Array) {
-        // Sensor spec: 50mm - 2000mm valid range
-        // 3D Error codes: 4080-4095 (0xFF0-0xFFF) indicate errors/out-of-range
-        const MIN_RANGE = 50;
-        const MAX_RANGE = 2000;
-        const ERROR_CODE_MIN = 4080; // 0xFF0
-        
-        // Reject if:
-        // 1. Zero (no measurement)
-        // 2. Below minimum range
-        // 3. Above maximum range  
-        // 4. Error code range (4080-4095)
-        if (dist === 0 || dist < MIN_RANGE || dist > MAX_RANGE || dist >= ERROR_CODE_MIN) {
-             points[idx*4] = 0;
-             points[idx*4+1] = 0;
-             points[idx*4+2] = 0;
-             points[idx*4+3] = 0; 
-             return;
-        }
 
-        const MM2M = 0.001;
-        
-        const x = dist * tablex[idx] * MM2M;
-        const y = -dist * tabley[idx] * MM2M; 
-        const z = -dist * tablez[idx] * MM2M; 
-        
-        // Simple Hue Color Mapping
-        const normalized = Math.min(dist / 3000.0, 1.0);
-        const hue = (1.0 - normalized) * 0.7; // Red to Blue/Purple
-
-        points[idx*4] = x;
-        points[idx*4+1] = y;
-        points[idx*4+2] = z;
-        points[idx*4+3] = hue;
-    }
 
     /**
      * Compute 3D point for DEPTH CAMERA using row/column-based projection
@@ -537,7 +506,7 @@ export class Parser {
         points: Float32Array
     ) {
         const MIN_RANGE = 50;
-        const MAX_RANGE = 2000;      // 3D depth camera spec: 50-2000mm
+        const MAX_RANGE = 4000;      // 3D depth camera spec: 50-2000mm
         const ERROR_CODE_MIN = 4080;
         
         // Reject invalid measurements
@@ -594,29 +563,66 @@ export class Parser {
          }
     }
     
-    private parse2DBitShift(pkt: Uint8Array, payloadLen: number) {
-         const dataLen = payloadLen - 1;
-         const numPoints = Math.floor(dataLen / 2);
+    private parse2DBitShift(pkt: Uint8Array, _payloadLen: number) {
+         // const dataLen = payloadLen - 1; // Subtract checksum
+         const numPoints = 160; // Fixed 160 points as per spec
          const points: Point2D[] = [];
-         const MAX_POINTS = 1000;
+         
+         // Data starts at index 6 (after 6-byte header), effectively index 0 relative to payload if we slice it
+         // But here 'pkt' seems to include header. Let's check call site.
+         // In processBuffer, 'packet' is passed. packet includes Header (6) + Data (320) + CS (1) = 327 bytes.
+         // So data starts at index 6.
+         
+         const HEADER_SIZE = 6;
          
          for(let i=0; i<numPoints; i++) {
-             if (points.length >= MAX_POINTS) break;
+             const off = HEADER_SIZE + (i*2);
+             
+             // Safety check
+             if (off + 1 >= pkt.length) break;
 
-             const off = 6 + (i*2);
+             // 16-bit value (LSB + MSB)
+             // Original code was (pkt[off] << 8) | pkt[off+1] -> This is Big Endian?
+             // Hex String code was parseInt -> Hex string order is "LSB MSB" ?? No wait.
+             // Let's re-read Hex String logic:
+             // hexChars = dataStr.substring(i*4, i*4+4); -> 4 chars = 2 bytes.
+             // parseInt("AABB", 16) -> 0xAABB. 
+             // If manual says "LSB MSB", then "AABB" means Byte1=AA, Byte2=BB.
+             // Wait, let's check `parse3DHex`:
+             // "Pixel i: first 12 bits (byte0 + high nibble of byte1)" -> Big Endian essentially for 3D.
+             // For 2D: "Data Type: 16 bit (2 bytes per distance)"
+             // The old code `(pkt[off] << 8) | pkt[off+1]` assumes Big Endian (MSB at `off`).
+             // Let's verify what `parse2DHexString` does.
+             // `parse2DHexString` takes `hexData` string. 
+             // `dist = parseInt(distHex, 16)`.
+             // If the bytes on wire are `[0x01, 0x02]`
+             // Hex string is `"0102"`. `parseInt("0102", 16)` is `0x0102` = 258.
+             // If it's Big Endian, `0x01` is MSB. `(0x01 << 8) | 0x02` = 258. 
+             // So `parseInt` on string order matches Big Endian logic if string is "Byte1Byte2".
+             
+             // The old bitshift code was: `(pkt[off] << 8) | pkt[off+1]`.
+             // If `pkt[off]` is the first byte (Byte1) and `pkt[off+1]` is second (Byte2).
+             // Then this IS Big Endian.
+             // So the endianness seems consistent.
+             
              const dist = (pkt[off] << 8) | pkt[off+1];
 
-             const step = 120.0 / (numPoints - 1 || 1); 
-             const angleDeg = -60 + (i * step);
+             // Angle calculation: -60 to +60
+             // Hex String: -60 + (i * (120 / (numPoints - 1)))
+             // Fixed 160 points -> step = 120 / 159 ~= 0.7547...
+             // Wait, Hex String implementation used: `const angleDeg = -60 + (pointIndex * 0.75);` (Fixed 0.75)
+             // 0.75 * 159 = 119.25. Range -60 to 59.25.
+             // Let's stick to the Hex String logic: 0.75 step.
+             
+             const angleDeg = -60 + (i * 0.75);
              const angleRad = angleDeg * (Math.PI/180);
 
-             if (dist > 0 && dist < 10000 && dist < 16000) {
-                 const dm = dist/1000.0;
+             // Filter matches Hex String: > 50 && < 16000
+             if (dist > 50 && dist < 16000) {
+                 const dm = dist * 0.001;
                  const x = -Math.sin(angleRad) * dm;
                  const z = Math.cos(angleRad) * dm;
                  
-                 // const hue = (1.0 - Math.min(dm/3, 1)) * 0.3; 
-                 // Removing 'c' property. Use generic color for now.
                  points.push({ x, y: 0, z, color: 0x00ff00 }); 
              }
          }
