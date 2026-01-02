@@ -58,6 +58,36 @@ export const CMD = {
     scanDual: createCommand(0x07, [0x00, 0x05]),
     stop:   createCommand(0x02, [0x00, 0x00]),
     info:   createCommand(0x10, [0x00, 0x12]),
-    freq:   createCommand(0x00, []), 
-    pulse:  createCommand(0x0C, [0x10, 0x67, 0x78])
+    
+    // 3D Setup Commands (CRITICAL for proper operation!)
+    pulse3DAuto:   createCommand(0x0C, [0x00, 0x00]),        // Auto mode
+    pulse3D_5ms:   createCommand(0x0C, [0x01, 0x13, 0x88]),  // Fixed 5000μs (5ms) - stronger signal
+    pulse3D_10ms:  createCommand(0x0C, [0x01, 0x27, 0x10]),  // Fixed 10000μs (10ms) - maximum!
+    frequencyCh0:  createCommand(0x0F, [0x00]),              // Frequency channel 0
+    sensitivity:   createCommand(0x11, [0x64]),              // Sensitivity = 100 (0x64) - MAXIMUM!
+    
+    // Baud Rate Change Commands (0x12) - NEW FORMAT (F/W >= 0.2.4)
+    // Format: 0x5A 0x77 0xFF 0x02 0x00 0x12 [BAUD_CODE] [CHECKSUM]
+    // IMPORTANT: Value is stored in flash ROM and device reboots!
+    setBaud3000000: createCommand(0x12, [0x55]),   // 3,000,000 bps (default)
+    setBaud250000:  createCommand(0x12, [0x77]),   // 250,000 bps
+    setBaud115200:  createCommand(0x12, [0xAA]),   // 115,200 bps
+    setBaud57600:   createCommand(0x12, [0x39]),   // 57,600 bps
 };
+
+/**
+ * Sends a sequence of commands with delays between each
+ * @param sendCommand - Function to send a single command
+ * @param commands - Array of commands to send
+ * @param delayMs - Delay in ms between commands (default 100ms)
+ */
+export async function sendCommandSequence(
+    sendCommand: (cmd: Uint8Array) => Promise<void>,
+    commands: Uint8Array[],
+    delayMs: number = 100
+): Promise<void> {
+    for (const cmd of commands) {
+        await sendCommand(cmd);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+}

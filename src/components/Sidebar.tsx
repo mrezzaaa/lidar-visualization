@@ -10,9 +10,13 @@ interface SidebarProps {
     onCommand: (cmd: Uint8Array) => void;
     onExportCSV: () => void;
     onToggleMesh: () => void;
+    onTestFlatGrid: () => void;
+    onShowMatrix: () => void;
+    onChangeBaudRate: (newBaud: number) => void;
     meshMode: boolean;
     frames: number;
     points: number;
+    rawDistances: Uint16Array | null;
     deviceInfo: { ver: string; hw: string } | null;
     filterMode: string;
     setFilterMode: (mode: any) => void;
@@ -27,12 +31,17 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ 
-    isConnected, onConnect, onDisconnect, onCommand, onExportCSV, onToggleMesh, meshMode, frames, points, deviceInfo, 
+    isConnected, onConnect, onDisconnect, onCommand, onExportCSV, onToggleMesh, onTestFlatGrid, onShowMatrix, onChangeBaudRate, meshMode, frames, points, rawDistances, deviceInfo, 
     filterMode, setFilterMode, parserMode, setParserMode,
     slamActive, onStartMapping, onStopMapping, onResetMap, slamPostprocessing, onSlamPostprocessingChange
 }) => {
     const [scanMode, setScanMode] = React.useState<'2D' | '3D' | 'Dual'>('2D');
     const [baudRate, setBaudRate] = React.useState(3000000);
+    const [showBaudModal, setShowBaudModal] = React.useState(false);
+    const [sensitivity, setSensitivity] = React.useState(100);
+    const [frequencyChannel, setFrequencyChannel] = React.useState(0);
+    const [pulseMode, setPulseMode] = React.useState<'auto' | 'fixed'>('auto');
+    const [pulseDuration, setPulseDuration] = React.useState(5000); // in microseconds
 
     const FILTERS = [
         { id: 'NONE', label: 'Raw Data' },
@@ -48,10 +57,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
         else onConnect(baudRate);
     };
 
-    const handleStart = () => {
-        if (scanMode === '2D') onCommand(CMD.scan2D);
-        else if (scanMode === '3D') onCommand(CMD.scan3D);
-        else onCommand(CMD.scanDual);
+    const handleStart = async () => {
+        // For 3D mode, send setup commands first
+        if (scanMode === '3D') {
+            console.log('[Sidebar] Setting up 3D mode with LONG PULSE (10ms)...');
+            
+            // Send setup sequence with delays
+            await onCommand(CMD.pulse3D_10ms);       // 1. Set pulse to 10ms (maximum) for stronger signal
+            await new Promise(r => setTimeout(r, 150));
+            
+            await onCommand(CMD.frequencyCh0);       // 2. Set frequency channel 0
+            await new Promise(r => setTimeout(r, 150));
+            
+            await onCommand(CMD.sensitivity);        // 3. Set sensitivity to 20
+            await new Promise(r => setTimeout(r, 150));
+            
+            console.log('[Sidebar] 3D setup complete (10ms pulse), starting scan...');
+            await onCommand(CMD.scan3D);             // 4. Start 3D scan
+        }
+        else if (scanMode === '2D') {
+            onCommand(CMD.scan2D);
+        }
+        else {
+            onCommand(CMD.scanDual);
+        }
     };
 
     return (
@@ -75,6 +104,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             disabled={isConnected}
                         >
                             <option value={3000000}>3,000,000 bps</option>
+                            <option value={250000}>250,000 bps</option>
                             <option value={115200}>115,200 bps</option>
                             <option value={57600}>57,600 bps</option>
                         </select>
@@ -88,6 +118,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         >
                             {isConnected ? 'Disconnect' : 'Connect Serial'}
                         </button>
+                        
+                        {/* Baud Rate Selector */}
+                        {isConnected && (
+                            <button
+                                className="w-full px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded font-medium"
+                                onClick={() => setShowBaudModal(true)}
+                            >
+                                ⚡ Change Baud Rate
+                            </button>
+                        )}
                     </div>
                 </section>
 
@@ -174,6 +214,124 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             <Square size={16} fill="currentColor" /> Stop
                         </button>
                     </div>
+                    
+                    {/* Sensitivity Control */}
+                    <div className="space-y-2 pt-2">
+                        <div className="flex justify-between items-center">
+                            <label className="text-xs text-gray-400 font-semibold">Sensitivity</label>
+                            <span className="text-sm font-mono text-blue-400">{sensitivity}</span>
+                        </div>
+                        <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={sensitivity}
+                            onChange={(e) => {
+                                const newSens = parseInt(e.target.value);
+                                setSensitivity(newSens);
+                                // Send SET_SENSITIVITY command (0x11) to sensor
+                                const cmd = new Uint8Array([
+                                    0x5A, 0x77, 0xFF,           // Header
+                                    0x02, 0x00,                  // Length
+                                    0x11, newSens,               // Command + Value
+                                    (0x02 ^ 0x00 ^ 0x11 ^ newSens)  // Checksum
+                                ]);
+                                onCommand(cmd);
+                            }}
+                            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                        />
+                        <div className="flex justify-between text-xs text-gray-500">
+                            <span>Low</span>
+                            <span>High</span>
+                        </div>
+                    </div>
+                    
+                    {/* Frequency Channel Control */}
+                    <div className="space-y-2 pt-2">
+                        <label className="text-xs text-gray-400 font-semibold">Frequency Channel</label>
+                        <select
+                            value={frequencyChannel}
+                            onChange={(e) => {
+                                const channel = parseInt(e.target.value);
+                                setFrequencyChannel(channel);
+                                // Send SET_FREQUENCY_CHANNEL command (0x0F)
+                                const cmd = new Uint8Array([
+                                    0x5A, 0x77, 0xFF,           // Header
+                                    0x02, 0x00,                  // Length
+                                    0x0F, channel,               // Command + Channel
+                                    (0x02 ^ 0x00 ^ 0x0F ^ channel)  // Checksum
+                                ]);
+                                onCommand(cmd);
+                            }}
+                            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
+                        >
+                            {Array.from({length: 16}, (_, i) => (
+                                <option key={i} value={i}>Channel {i}</option>
+                            ))}
+                        </select>
+                        <p className="text-xs text-gray-500">Avoid interference with multiple devices</p>
+                    </div>
+                    
+                    {/* Pulse Duration Control */}
+                    <div className="space-y-2 pt-2">
+                        <label className="text-xs text-gray-400 font-semibold">3D Pulse Duration</label>
+                        <select
+                            value={pulseMode}
+                            onChange={(e) => {
+                                const mode = e.target.value as 'auto' | 'fixed';
+                                setPulseMode(mode);
+                                if (mode === 'auto') {
+                                    // Send AUTO mode (0x0C with [0x00, 0x00])
+                                    const cmd = new Uint8Array([
+                                        0x5A, 0x77, 0xFF,
+                                        0x03, 0x00,
+                                        0x0C, 0x00, 0x00,
+                                        (0x03 ^ 0x00 ^ 0x0C ^ 0x00 ^ 0x00)
+                                    ]);
+                                    onCommand(cmd);
+                                }
+                            }}
+                            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
+                        >
+                            <option value="auto">Auto</option>
+                            <option value="fixed">Fixed</option>
+                        </select>
+                        
+                        {pulseMode === 'fixed' && (
+                            <div className="space-y-2">
+                                <div className="flex justify-between items-center">
+                                    <span className="text-xs text-gray-500">Duration (μs)</span>
+                                    <span className="text-sm font-mono text-blue-400">{pulseDuration}</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    min="0"
+                                    max="10000"
+                                    step="100"
+                                    value={pulseDuration}
+                                    onChange={(e) => {
+                                        const duration = parseInt(e.target.value);
+                                        setPulseDuration(duration);
+                                        // Send FIXED mode with duration value
+                                        const LSB = duration & 0xFF;
+                                        const MSB = ((duration >> 8) & 0xFF) | 0x40; // Set bit 6 for Fixed mode
+                                        const cmd = new Uint8Array([
+                                            0x5A, 0x77, 0xFF,
+                                            0x03, 0x00,
+                                            0x0C, LSB, MSB,
+                                            (0x03 ^ 0x00 ^ 0x0C ^ LSB ^ MSB)
+                                        ]);
+                                        onCommand(cmd);
+                                    }}
+                                    className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                                />
+                                <div className="flex justify-between text-xs text-gray-500">
+                                    <span>0 μs</span>
+                                    <span>10,000 μs</span>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </section>
 
                 {/* SLAM Mapping */}
@@ -231,7 +389,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <section className="space-y-3">
                     <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Tools</h2>
                     <div className="space-y-2">
-                        
+                    {/* Test Flat Grid Button */}
+                    <button 
+                        className="w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded text-sm font-medium transition"
+                        onClick={onTestFlatGrid}
+                        disabled={!isConnected}
+                        title="Generate test flat depth grid at 1500mm"
+                    >
+                            🧪 Test Flat Grid (1500mm)
+                    </button>
+                    
+                    {/* View Depth Matrix Button */}
+                    <button 
+                        className="w-full px-4 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded text-sm font-medium transition"
+                        onClick={onShowMatrix}
+                        disabled={!isConnected}
+                        title="View full 160×60 depth matrix"
+                    >
+                        📊 View Depth Matrix
+                    </button>
                         <button 
                             onClick={onExportCSV}
                             disabled={!points}
@@ -245,6 +421,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         >
                             {meshMode ? 'Mesh Mode: ON' : 'Mesh Mode: OFF'}
                         </button>
+                        
                     </div>
                 </section>
             </div>
@@ -260,6 +437,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <span>{points}</span>
                 </div>
             </div>
+            
+            {/* Baud Rate Change Modal */}
+            {showBaudModal && (
+                <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-50">
+                    <div className="bg-gray-800 border border-gray-600 rounded-lg p-6 w-80">
+                        <h3 className="text-white font-bold mb-4">⚡ Change Baud Rate</h3>
+                        <div className="space-y-2">
+                            {[3000000, 250000, 115200, 57600].map(baud => (
+                                <button
+                                    key={baud}
+                                    className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded"
+                                    onClick={() => {
+                                        setShowBaudModal(false);
+                                        onChangeBaudRate(baud);
+                                    }}
+                                >
+                                    {baud.toLocaleString()} bps
+                                </button>
+                            ))}
+                        </div>
+                        <button
+                            className="w-full mt-4 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded"
+                            onClick={() => setShowBaudModal(false)}
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

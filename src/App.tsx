@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { LidarViewer } from './components/LidarViewer';
+import { DepthMatrixModal } from './components/DepthMatrixModal';
+import { DepthMapPreview } from './components/DepthMapPreview';
 import { SerialHandler } from './logic/SerialHandler';
 import { Parser, Point2D, DeviceInfo, ParserMode } from './logic/Parser';
 import { SLAM } from './logic/SLAM';
 import { CMD } from './logic/utils';
+import { getBaudCommand } from './logic/BaudRateUtils';
 import { applySOR, applyROR, applyMLS, applyDBSCAN, applyPointCleanNet, applyVoxelGrid } from './logic/Filters';
 
 type SlamPostprocessing = 'None' | 'VoxelGrid' | 'SOR';
@@ -24,6 +27,7 @@ function App() {
   const [slamActive, setSlamActive] = useState(false);
   const [slamUpdateTrigger, setSlamUpdateTrigger] = useState(0); // Force re-render when SLAM updates
   const [slamPostprocessing, setSlamPostprocessing] = useState<SlamPostprocessing>('None');
+  const [showMatrixModal, setShowMatrixModal] = useState(false);
 
   const serialRef = useRef<SerialHandler>(new SerialHandler());
   const parserRef = useRef<Parser | null>(null);
@@ -204,6 +208,50 @@ function App() {
       slamRef.current.reset();
   };
 
+  const handleTestFlatGrid = () => {
+      if (parserRef.current) {
+          parserRef.current.generateTestFlatGrid();
+      } else {
+          alert('Parser not initialized');
+      }
+  };
+
+  const handleChangeBaudRate = async (newBaud: number) => {
+    if (!isConnected) {
+      alert('Please connect first before changing baud rate');
+      return;
+    }
+
+    const baudCmd = getBaudCommand(newBaud);
+    if (!baudCmd) {
+      alert(`Invalid baud rate: ${newBaud}`);
+      return;
+    }
+
+    console.log(`[App] Changing baud rate to ${newBaud}...`);
+    
+    try {
+      console.log('[App] Step 1: Sending SET_BAUDRATE command...');
+      await serialRef.current.send(baudCmd);
+      
+      console.log('[App] Step 2: Waiting for sensor...');
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      console.log('[App] Step 3: Disconnecting...');
+      await handleDisconnect();
+      
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      console.log(`[App] Step 4: Reconnecting with baud ${newBaud}...`);
+      await handleConnect(newBaud);
+      
+      console.log('[App] Baud rate changed successfully');
+    } catch (error) {
+      console.error('[App] Failed to change baud rate:', error);
+      alert(`Failed to change baud rate: ${error}`);
+    }
+  };
+
   return (
     <div className="flex h-screen w-screen bg-black overflow-hidden">
       <Sidebar 
@@ -213,9 +261,13 @@ function App() {
         onCommand={handleCommand}
         onExportCSV={handleExportCSV}
         onToggleMesh={() => setMeshMode(!meshMode)}
+        onTestFlatGrid={handleTestFlatGrid}
+        onShowMatrix={() => setShowMatrixModal(true)}
+        onChangeBaudRate={handleChangeBaudRate}
         meshMode={meshMode}
         frames={frames}
         points={points2D.length || (points3D ? 9600 : 0)}
+        rawDistances={rawDistances}
         deviceInfo={deviceInfo}
         filterMode={filterMode}
         setFilterMode={setFilterMode}
@@ -255,6 +307,24 @@ function App() {
             </div>
         )}
       </main>
+      
+      
+      {/* Depth Map Preview - Bottom Right Overlay */}
+      {rawDistances && (
+        <div className="fixed bottom-4 right-4 z-50">
+          <div className="bg-gray-900/90 backdrop-blur-sm border border-gray-700 rounded-lg p-2 shadow-2xl">
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1 px-1">Depth Map</h3>
+            <DepthMapPreview depthData={rawDistances} />
+          </div>
+        </div>
+      )}
+
+      {/* Depth Matrix Modal */}
+      <DepthMatrixModal 
+        isOpen={showMatrixModal}
+        onClose={() => setShowMatrixModal(false)}
+        depthData={rawDistances}
+      />
     </div>
   );
 }
