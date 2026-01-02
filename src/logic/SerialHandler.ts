@@ -24,7 +24,11 @@ export class SerialHandler {
 
         try {
             this.port = await navigator.serial.requestPort();
-            await this.port.open({ baudRate });
+            // 3Mbps requires HUGE buffer because JS thread might block for 16-33ms (1 frame)
+            // 3Mbps = ~375KB/s. 33ms = ~12KB. 
+            // Default buffer is small (4KB?). We need at least 1MB to be safe.
+            // Setting to 4MB to be extremely safe against GC pauses.
+            await this.port.open({ baudRate, bufferSize: 4 * 1024 * 1024 } as any);
             this.keepReading = true;
             this.readLoop();
             return true;

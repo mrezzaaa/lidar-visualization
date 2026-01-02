@@ -5,9 +5,12 @@ import { Point2D } from '../logic/Parser';
 
 interface LidarViewerProps {
     points2D: Point2D[];
-    points3D: Float32Array | null; 
-    meshMode: boolean;
+    points3D: Float32Array | null;
+    rawDistances: Uint16Array | null;
+    meshMode: boolean; // Toggle between points and mesh (future)
+    update3DTrigger?: number; // Force 3D update even if points3D ref is same
     slamPoints: Point2D[];  // Accumulated SLAM points
+    slamUpdateTrigger?: number; // Force SLAM update
 }
 
 export class LidarViewer extends React.Component<LidarViewerProps, {
@@ -68,19 +71,20 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
     }
     
     componentDidUpdate(prevProps: LidarViewerProps) {
-        // Update 2D points when they change
+        // console.log('[LidarViewer] Did Update. 2D len:', this.props.points2D.length);
         if (prevProps.points2D !== this.props.points2D) {
             this.update2DPoints();
         }
         
-        // Update 3D points when they change
-        if (prevProps.points3D !== this.props.points3D) {
+        // Check for 3D updates: either array ref changed or trigger changed
+        if (prevProps.points3D !== this.props.points3D || prevProps.update3DTrigger !== this.props.update3DTrigger) {
             this.update3DPoints();
+            // console.log("[LidarViewer] 3D Updated via trigger/prop change");
         }
-        
-        // Update mesh mode (if needed for future mesh rendering)
+
         if (prevProps.meshMode !== this.props.meshMode) {
-            // meshMode logic here if needed
+             console.log("Mesh mode toggled:", this.props.meshMode);
+             // TODO: Swap geometry logic if needed
         }
         
         // Update SLAM points - check length change since array reference stays same

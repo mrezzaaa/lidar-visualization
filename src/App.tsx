@@ -281,21 +281,16 @@ function App() {
         onSlamPostprocessingChange={(mode) => setSlamPostprocessing(mode as SlamPostprocessing)}
       />
       
-      <main className="flex-1 flex flex-col relative">
+      <div className="flex-1 flex flex-col relative bg-gray-900 overflow-hidden">
+        {/* Lidar 3D/2D Viewer */}
         <LidarViewer 
-          points2D={points2D} 
-          points3D={points3D} 
-          meshMode={meshMode}
-          slamPoints={(() => {
-            let processed = [...slamRef.current.getPoints()];
-            // Apply postprocessing filter
-            if (slamPostprocessing === 'VoxelGrid') {
-              processed = applyVoxelGrid(processed, 0.1);
-            } else if (slamPostprocessing === 'SOR') {
-              processed = applySOR(processed, 5, 1.0);
-            }
-            return processed;
-          })()}
+            points2D={points2D} 
+            points3D={points3D}
+            rawDistances={rawDistances}
+            meshMode={meshMode}
+            slamPoints={slamActive && slamRef.current ? [...slamRef.current.getPoints()] : []} // Create copy for now to ensure render
+            slamUpdateTrigger={slamUpdateTrigger}
+            update3DTrigger={frames} // Use frames as trigger - it changes every time new data arrives!
         />
         
         {/* Connection Status Overlay */}
@@ -306,7 +301,7 @@ function App() {
                 </div>
             </div>
         )}
-      </main>
+      </div>
       
       
       {/* Depth Map Preview - Bottom Right Overlay */}

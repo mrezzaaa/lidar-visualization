@@ -24,8 +24,19 @@ interface ParserCallbacks {
  * Handles buffering and parsing of Lidar packets.
  */
 export class Parser {
-    private buffer: Uint8Array;
-    private hexBuffer: string = '';  // For hexstring mode accumulation
+    // 3Mbps optimization: Pre-allocate 2MB buffer to avoid GC pressure
+    private buffer: Uint8Array = new Uint8Array(2_000_000); 
+    private bufferLength: number = 0; // Valid data length
+    private readOffset: number = 0;   // Current read position
+    
+    // Rate Limiting & GC Optimization
+    private last3DTime: number = 0;
+    private reusablePoints: Float32Array;      // 160*60*4 = 38,400 floats
+    private reusableDistances: Uint16Array;    // 160*60 = 9,600 ints
+
+    // Hex buffer fallback (only used for Hex mode debugging if needed, but we should optimize this too if Hex mode is slow)
+    // For now, focusing optimization on BitShift mode which is default
+    private hexBuffer: string = '';  
     public frames: number;
     public parserMode: ParserMode = 'bitshift';
     
@@ -34,9 +45,13 @@ export class Parser {
     private onInfo: (info: DeviceInfo) => void;
 
     constructor(callbacks: ParserCallbacks) {
-        this.buffer = new Uint8Array(0);
         this.frames = 0;
         
+        // Pre-allocate large buffers once
+        const totalPixels = 160 * 60;
+        this.reusablePoints = new Float32Array(totalPixels * 4);
+        this.reusableDistances = new Uint16Array(totalPixels);
+
         this.on2D = callbacks.on2D || (() => {});
         this.on3D = callbacks.on3D || (() => {});
         this.onInfo = callbacks.onInfo || (() => {});
@@ -45,6 +60,10 @@ export class Parser {
     setParserMode(mode: ParserMode) {
         // console.log(`[Parser] Mode changing: ${this.parserMode} → ${mode}`);
         this.parserMode = mode;
+        // Reset buffer on mode change
+        this.readOffset = 0;
+        this.bufferLength = 0;
+        this.hexBuffer = '';
     }
 
     /**
@@ -70,23 +89,6 @@ export class Parser {
             this.computePointDepthCamera(i, FLAT_DEPTH, GRID_WIDTH, GRID_HEIGHT, points);
         }
 
-        // Log sample points for verification
-        // console.log('\n[Test Grid] Sample 3D coordinates:');
-        for (let row = 0; row < 3; row++) {
-            const samples = [];
-            for (let col = 0; col < 5; col++) {
-                const idx = row * GRID_WIDTH + col;
-                const x = points[idx * 4].toFixed(3);
-                const y = points[idx * 4 + 1].toFixed(3);
-                const z = points[idx * 4 + 2].toFixed(3);
-                samples.push(`R${row}C${col}:(${x},${y},${z})`);
-            }
-            // console.log('  ' + samples.join(' | '));
-        }
-
-        // console.log('\n[Test Grid] Expected: Flat rectangular grid at Z ≈ -1.5m');
-        // console.log('═══════════════════════════════════════════════════════\n');
-
         // Send to visualization
         this.on3D(points, distances);
     }
@@ -95,222 +97,174 @@ export class Parser {
         if (typeof data === 'string') {
             // HEXSTRING MODE: Accumulate hex string
             this.hexBuffer += data;
-            // Removed noisy log - only log on packet extraction
-            
-            // Process hex buffer for header-to-header extraction
             this.processHexBuffer();
         } else {
-            // BITSHIFT MODE: Existing path, DO NOT MODIFY
-            const newBuffer = new Uint8Array(this.buffer.length + data.length);
-            newBuffer.set(this.buffer);
-            newBuffer.set(data, this.buffer.length);
-            this.buffer = newBuffer;
+            // BITSHIFT MODE: Optimized Zero-Copy Buffer Path
             
-            // Log small packets (likely INFO responses)
-            if (data.length < 20) {
-                // console.log('[Parser] RX:', Array.from(data).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+            // 1. Compact buffer if needed (if readOffset is far ahead or buffer is full)
+            // Strategy: If readOffset > 50% of capacity OR remaining space < data.length
+            if (this.readOffset > 1_000_000 || (this.bufferLength + data.length > this.buffer.length)) {
+                this.compactBuffer();
             }
-            
+
+            // 2. Append new data
+            // Safety check: if data still doesn't fit after compaction, we must resize (rare fallback)
+            if (this.bufferLength + data.length > this.buffer.length) {
+                console.warn("[Parser] Buffer overflow resizing!");
+                const newB = new Uint8Array(this.buffer.length * 2);
+                newB.set(this.buffer.subarray(0, this.bufferLength));
+                this.buffer = newB;
+            }
+
+            this.buffer.set(data, this.bufferLength);
+            this.bufferLength += data.length;
+
             this.processBuffer();
         }
     }
 
-    private processBuffer() {
-        if (this.buffer.length > 500000) {
-            this.buffer = this.buffer.slice(this.buffer.length - 100000);
-        }
+    private compactBuffer() {
+        if (this.readOffset === 0) return;
+        
+        // Move valid data (readOffset -> bufferLength) to start (0)
+        // copyWithin is fast (memmove)
+        this.buffer.copyWithin(0, this.readOffset, this.bufferLength);
+        
+        this.bufferLength -= this.readOffset;
+        this.readOffset = 0;
+    }
 
-        // Header Definitions
-        // 2D: 5A 77 FF 43 01 01
-        // 3D: 5A 77 FF 41 38 08
-        // INFO: 5A 77 FF 07 00 10
-        const H2D = [0x5A, 0x77, 0xFF, 0x43, 0x01, 0x01];
-        const H3D = [0x5A, 0x77, 0xFF, 0x41, 0x38, 0x08];
+    private processBuffer() {
+        // Header Definitions matched byte-by-byte
+        const H2D   = [0x5A, 0x77, 0xFF, 0x43, 0x01, 0x01];
+        const H3D   = [0x5A, 0x77, 0xFF, 0x41, 0x38, 0x08];
         const HINFO = [0x5A, 0x77, 0xFF, 0x07, 0x00, 0x10];
 
         while (true) {
-            // 1. Search for ANY Header Start
+            // Available data length
+            const available = this.bufferLength - this.readOffset;
+            if (available < 6) break; // Need at least header size
+
+            // 1. Search for ANY Header Start using readOffset
             let firstHeaderIdx = -1;
             let firstHeaderType = -1; // 1=2D, 8=3D, 16=INFO
 
-            for(let i=0; i < this.buffer.length - 6; i++) {
-                // Check INFO first (shortest payload)
-                if (this.matchHeader(i, HINFO)) {
-                    firstHeaderIdx = i;
-                    firstHeaderType = 16;
-                    break;
-                }
-                // Check 2D
-                if (this.matchHeader(i, H2D)) {
-                    firstHeaderIdx = i;
-                    firstHeaderType = 1;
-                    break;
-                }
-                // Check 3D
-                if (this.matchHeader(i, H3D)) {
-                    firstHeaderIdx = i;
-                    firstHeaderType = 8;
-                    break;
+            // Scan limits: check up to available-6
+            const scanEnd = this.bufferLength - 6; 
+            
+            // Optimization: Use indexOf for the first byte (0x5A) then check rest
+            // Scan for 0x5A
+            for(let i = this.readOffset; i < scanEnd; i++) {
+                if (this.buffer[i] === 0x5A) {
+                    // Check rest of header
+                    if (this.matchHeader(i, HINFO)) {
+                        firstHeaderIdx = i; firstHeaderType = 16; break;
+                    }
+                    if (this.matchHeader(i, H2D)) {
+                        firstHeaderIdx = i; firstHeaderType = 1; break;
+                    }
+                    if (this.matchHeader(i, H3D)) {
+                        firstHeaderIdx = i; firstHeaderType = 8; break;
+                    }
                 }
             }
             
-            // Debug: if no header found and we have data, log it
-            if (firstHeaderIdx === -1 && this.buffer.length > 0 && this.buffer.length < 50) {
-                // console.log('[Parser] No header match. Buffer:', Array.from(this.buffer.slice(0, Math.min(20, this.buffer.length))).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
-            }
-
             if (firstHeaderIdx === -1) {
-                 // No header found in entire buffer
-                 // Keep visible window small to prevent overflow if no header ever comes
-                 if (this.buffer.length > 50000) {
-                     this.buffer = this.buffer.slice(this.buffer.length - 10000);
-                 }
+                 // No header found in entire available window
+                 // We can discard everything except maybe the last few bytes (fragments of a header)
+                 this.readOffset = Math.max(this.readOffset, this.bufferLength - 6);
                  return; 
             }
 
-            // Discard data before first header
-            if (firstHeaderIdx > 0) {
-                this.buffer = this.buffer.slice(firstHeaderIdx);
-                // Restart search from 0
-                continue;
+            // Discard garbage before first header
+            if (firstHeaderIdx > this.readOffset) {
+                this.readOffset = firstHeaderIdx;
             }
 
-            // Special case: INFO packet is fixed length (13 bytes total)
+            // Available bytes starting from header
+            const payloadAvailable = this.bufferLength - this.readOffset;
+
+            // ============================================================
+            // INFO Packet (Fixed 13 bytes)
+            // ============================================================
             if (firstHeaderType === 16) {
-                // console.log('[Parser] INFO header detected!');
-                const infoPacketLength = 13;
-                if (this.buffer.length >= infoPacketLength) {
-                    const packet = this.buffer.slice(0, infoPacketLength);
-                    // console.log('[Parser] INFO packet full:', Array.from(packet).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+                const INFO_LEN = 13;
+                if (payloadAvailable >= INFO_LEN) {
+                    // Extract using subarray (view)
+                    const packet = this.buffer.subarray(this.readOffset, this.readOffset + INFO_LEN);
                     
-                    // Validate checksum
-                    const len = packet.length;
-                    const receivedCS = packet[len - 1];
-                    let calcCS = 0;
-                    for(let i=3; i < len - 1; i++) {
-                        calcCS ^= packet[i];
-                    }
-                    
-                    // console.log('[Parser] Checksum - Received:', '0x' + receivedCS.toString(16), 'Calculated:', '0x' + calcCS.toString(16));
-                    
-                    if (calcCS === receivedCS) {
+                    if (this.validateChecksum(packet)) {
                         this.frames++;
-                        // console.log('[Parser] Checksum OK - calling parseInfo()');
                         this.parseInfo(packet);
-                    } else {
-                        console.warn('[Parser] Checksum FAILED for INFO packet');
                     }
-                    
-                    // Advance buffer past INFO packet
-                    this.buffer = this.buffer.slice(infoPacketLength);
+                    this.readOffset += INFO_LEN;
                     continue;
                 } else {
-                    // console.log('[Parser] Waiting for complete INFO packet. Have:', this.buffer.length, 'Need: 13');
-                    // Wait for complete INFO packet
-                    return;
+                    return; // Wait for more data
                 }
             }
 
-            // Special case for 2D: Use FIXED LENGTH (more stable than header-to-header)
-            // 2D packet structure:
-            // Header: 6 bytes (0x5A 0x77 0xFF 0xF3 0x00 0x01)
-            // Data: 160 points × 2 bytes = 320 bytes
-            // Checksum: 1 byte
-            // Total: 327 bytes
+            // ============================================================
+            // 2D Packet (Fixed 327 bytes)
+            // ============================================================
             if (firstHeaderType === 1) {
                 const FIXED_2D_LENGTH = 327;
                 
-                if (this.buffer.length >= FIXED_2D_LENGTH) {
-                    const packet = this.buffer.slice(0, FIXED_2D_LENGTH);
+                if (payloadAvailable >= FIXED_2D_LENGTH) {
+                    const packet = this.buffer.subarray(this.readOffset, this.readOffset + FIXED_2D_LENGTH);
                     
-                    // Validate checksum
-                    const len = packet.length;
-                    const receivedCS = packet[len - 1];
-                    let calcCS = 0;
-                    for(let i=3; i < len - 1; i++) {
-                        calcCS ^= packet[i];
-                    }
-                    
-                    if (calcCS === receivedCS) {
+                    if (this.validateChecksum(packet)) {
                         this.frames++;
-                        const realPayloadLen = 320; // Fixed 320 bytes data
-                        this.parse2D(packet, realPayloadLen);
+                        this.parse2D(packet, 320);
                     } else {
-                        // Bad checksum - try to parse anyway (legacy behavior)
-                        const realPayloadLen = 320;
-                        this.parse2D(packet, realPayloadLen);
+                        // Legacy: Force parse even if bad checksum
                         this.frames++;
+                        this.parse2D(packet, 320); 
                     }
-                    
-                    // Advance buffer by fixed length
-                    this.buffer = this.buffer.slice(FIXED_2D_LENGTH);
+                    this.readOffset += FIXED_2D_LENGTH;
                     continue;
                 } else {
-                    // Wait for complete 2D packet
-                    return;
+                    return; // Wait
                 }
             }
 
-            // For 3D: Search for the SECOND Header
-            let secondHeaderIdx = -1;
-            
-            // Start searching AFTER the current header (offset 6)
-            for(let i=6; i < this.buffer.length - 6; i++) {
-                 if (this.matchHeader(i, H2D) || this.matchHeader(i, H3D)) {
-                     secondHeaderIdx = i;
-                     break;
-                 }
-            }
+            // ============================================================
+            // 3D Packet (Fixed 14407 bytes)
+            // ============================================================
+            if (firstHeaderType === 8) {
+                // Header (6) + Data (160*60*1.5 = 14400) + Checksum (1) = 14407 bytes
+                const FIXED_3D_LENGTH = 14407;
 
-            if (secondHeaderIdx === -1) {
-                // Second header not found yet.
-                // We need to wait for more data.
-                // Safety: If buffer grows massive without a second header, something is wrong.
-                if (this.buffer.length > 40000) {
-                    // console.warn("Buffer huge implies missing next header?");
+                if (payloadAvailable >= FIXED_3D_LENGTH) {
+                    const packet = this.buffer.subarray(this.readOffset, this.readOffset + FIXED_3D_LENGTH);
+
+                    if (this.validateChecksum(packet)) {
+                        this.frames++;
+                        this.parse3D(packet);
+                    } else {
+                        // console.warn(`[Parser] 3D Checksum Failed (Len: ${FIXED_3D_LENGTH})`);
+                        // Optional: Force parse if we trust length? No, bad data is bad.
+                    }
+                    this.readOffset += FIXED_3D_LENGTH;
+                    continue;
+                } else {
+                    return; // Wait for full packet
                 }
-                return;
             }
-
-            // 3. Extract logic: "ambil mulai dari yang first sampai checksum sebelum header second"
-            // The packet is from 0 to secondHeaderIdx.
-            const packet = this.buffer.slice(0, secondHeaderIdx);
-            
-            // Checksum Validation
-            // calculated from [3]...[len-2]
-            // received is [len-1]
-            const len = packet.length;
-            const receivedCS = packet[len - 1];
-            let calcCS = 0;
-            for(let i=3; i < len - 1; i++) {
-                calcCS ^= packet[i];
-            }
-
-            if (calcCS === receivedCS) {
-                this.frames++;
-                if (firstHeaderType === 8) {
-                     this.parse3D(packet);
-                } else if (firstHeaderType === 1) {
-                     const realPayloadLen = Math.max(0, len - 7);
-                     this.parse2D(packet, realPayloadLen);
-                } else if (firstHeaderType === 16) {
-                     this.parseInfo(packet);
-                }
-            } else {
-                 console.warn(`[Parser] Checksum FAILED (H2H). Type: ${firstHeaderType} Len: ${len}`);
-                 // Legacy Force Parse
-                 if (firstHeaderType === 1) {
-                     // console.warn("Forcing 2D Parse (Legacy)");
-                     const realPayloadLen = Math.max(0, len - 7);
-                     this.parse2D(packet, realPayloadLen);
-                     this.frames++;
-                 }
-            }
-
-            // 4. Advance buffer: "baru lanjut proses seterusnya"
-            // The 'second header' becomes the 'first header' for the next iteration.
-            this.buffer = this.buffer.slice(secondHeaderIdx);
         }
+    }
+
+    private validateChecksum(packet: Uint8Array): boolean {
+        const len = packet.length;
+        if (len < 5) return false;
+        
+        const receivedCS = packet[len - 1];
+        let calcCS = 0;
+        // Checksum from index 3 up to len-2
+        for(let i=3; i < len - 1; i++) {
+            calcCS ^= packet[i];
+        }
+        return calcCS === receivedCS;
     }
 
     /**
@@ -440,6 +394,14 @@ export class Parser {
     }
 
     private parse3D(pkt: Uint8Array) {
+        // Rate Limiting: Check BEFORE heavy parsing loop
+        // Only emit 3D data max 30 times per second (33ms)
+        const now = performance.now();
+        if (now - this.last3DTime < 33) {
+            return; // Skip this frame entirely (saving CPU)
+        }
+        this.last3DTime = now;
+
         // pkt includes Header(6) + Data + Checksum(1)
         // Data starts at 6
         const dataStart = 6;
@@ -451,8 +413,14 @@ export class Parser {
         const GRID_HEIGHT = 60;
         const totalPixels = GRID_WIDTH * GRID_HEIGHT;
         
-        const points = new Float32Array(totalPixels * 4); 
-        const distances = new Uint16Array(totalPixels);
+        // REUSE BUFFERS: Do not allocate new arrays every frame
+        // Use the pre-allocated class members
+        const points = this.reusablePoints;
+        const distances = this.reusableDistances;
+
+        // Clear previous data (optional but good for safety)
+        // points.fill(0); 
+        // distances.fill(0);
 
         let dataIndex = dataStart;
         
@@ -542,7 +510,7 @@ export class Parser {
         // X = horizontal offset calculated from column angle
         // Y = vertical offset calculated from row angle
         const z = -depthM;                        // Depth along Z-axis
-        const x = z * Math.tan(colAngleRad);     // Use col angle for X
+        const x = -z * Math.tan(colAngleRad);     // MIRRORED: Invert X for correct left/right orientation
         const y = z * Math.tan(rowAngleRad);     // Use row angle for Y
 
         // Color mapping based on depth
@@ -620,7 +588,8 @@ export class Parser {
              // Filter matches Hex String: > 50 && < 16000
              if (dist > 50 && dist < 16000) {
                  const dm = dist * 0.001;
-                 const x = -Math.sin(angleRad) * dm;
+                 // MIRRORED: Invert X (remove negation of sin)
+                 const x = Math.sin(angleRad) * dm;
                  const z = Math.cos(angleRad) * dm;
                  
                  points.push({ x, y: 0, z, color: 0x00ff00 }); 
@@ -747,7 +716,7 @@ export class Parser {
             if (!isNaN(dist) && dist > 50 && dist < 16000) {
                 const dm = dist * 0.001;
                 points.push({ 
-                    x: -Math.sin(angleRad) * dm, 
+                    x: Math.sin(angleRad) * dm, // MIRRORED: Invert X (remove negation)
                     y: 0, 
                     z: Math.cos(angleRad) * dm, 
                     color: 0x00ff00 
