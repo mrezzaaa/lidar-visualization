@@ -1,6 +1,9 @@
 
 
+import { tablex, tabley, tablez } from './Constants3D';
+
 export interface Point2D {
+
     x: number;
     y: number;
     z: number;
@@ -238,13 +241,8 @@ export class Parser {
                 if (payloadAvailable >= FIXED_3D_LENGTH) {
                     const packet = this.buffer.subarray(this.readOffset, this.readOffset + FIXED_3D_LENGTH);
 
-                    if (this.validateChecksum(packet)) {
-                        this.frames++;
-                        this.parse3D(packet);
-                    } else {
-                        // console.warn(`[Parser] 3D Checksum Failed (Len: ${FIXED_3D_LENGTH})`);
-                        // Optional: Force parse if we trust length? No, bad data is bad.
-                    }
+                    this.frames++;
+                    this.parse3D(packet);
                     this.readOffset += FIXED_3D_LENGTH;
                     continue;
                 } else {
@@ -450,77 +448,70 @@ export class Parser {
             dataIndex += 3;
         }
         
+        // Count valid points for diagnostics (first frame only)
+        if (this.frames === 0) {
+            let validCount = 0;
+            for (let i = 0; i < totalPixels; i++) {
+                if (points[i * 4 + 2] !== 0) validCount++;
+            }
+            console.log(
+                `%c[Parser] 3D Frame #1 parsed. Valid pixels: ${validCount}/${totalPixels}. ` +
+                `Sample distances (px0..4): ${distances[0]}, ${distances[1]}, ${distances[2]}, ${distances[3]}, ${distances[4]} mm`,
+                'color: #818CF8; font-weight: bold;'
+            );
+        }
+        
         this.on3D(points, distances);
     }
 
     /**
-     * Legacy: Compute 3D point using lookup tables (for bitshift mode)
-     */
-
-
-    /**
-     * Compute 3D point for DEPTH CAMERA using row/column-based projection
-     * @param idx Linear index in the depth grid (0-9599)
-     * @param dist Depth value in millimeters
-     * @param gridWidth Width of depth grid (160)
-     * @param gridHeight Height of depth grid (60)
-     * @param points Output Float32Array
+     * Compute 3D point using the CygLiDAR D1 fisheye lens distortion tables.
+     *
+     * Matches the official reference implementation (firstnode.py / distort3DLens):
+     *   x_world (m) = dist_mm * tablex[idx]
+     *   y_world (m) = dist_mm * tabley[idx]
+     *   z_world (m) = dist_mm * tablez[idx]
+     *
+     * tablex/tabley/tablez are pre-computed at startup from the 100-entry
+     * angleCamera / realImageSize look-up tables in Constants3D.ts.
+     *
+     * @param idx   Pixel linear index  (col + row × 160), range 0-9599
+     * @param dist  Raw 12-bit distance value in mm
+     * @param points Output Float32Array [x, y, z, hue, ...]
      */
     private computePointDepthCamera(
-        idx: number, 
-        dist: number, 
-        gridWidth: number, 
-        gridHeight: number, 
+        idx: number,
+        dist: number,
+        _gridWidth: number,
+        _gridHeight: number,
         points: Float32Array
     ) {
-        const MIN_RANGE = 50;
-        const MAX_RANGE = 4000;      // 3D depth camera spec: 50-2000mm
+        const MIN_RANGE      = 50;
+        const MAX_RANGE      = 2000;  // CygLiDAR D1 spec: 50–2000 mm
         const ERROR_CODE_MIN = 4080;
-        
-        // Reject invalid measurements
+
+        // Reject invalid / error-code measurements
         if (dist === 0 || dist < MIN_RANGE || dist > MAX_RANGE || dist >= ERROR_CODE_MIN) {
-            points[idx*4] = 0;
-            points[idx*4+1] = 0;
-            points[idx*4+2] = 0;
-            points[idx*4+3] = 0;
+            points[idx * 4    ] = 0;
+            points[idx * 4 + 1] = 0;
+            points[idx * 4 + 2] = 0;
+            points[idx * 4 + 3] = 0;
             return;
         }
 
-        // Convert linear index to row/column
-        // This maps the linear data index to the actual grid position
-        const row = Math.floor(idx / gridWidth);  // Which row (0-59)
-        const col = idx % gridWidth;              // Which column (0-159)
+        // Apply fisheye undistortion via pre-computed direction cosines
+        // dist is in mm; tablex/y/z already include the 0.001 (mm→m) factor
+        const x =  dist * tablex[idx];  // +X = left
+        const y = -dist * tabley[idx];  // invert Y so +Y = up
+        const z =  dist * tablez[idx];  // +Z = forward
 
-        // Depth camera FOV (degrees) - FROM MANUAL
-        const H_FOV = 120; // Horizontal field of view
-        const V_FOV = 65;  // Vertical field of view (manual says 65°, not 60°!)
+        // Hue: Red = close (50 mm), Blue = far (2000 mm)
+        const hue = (1.0 - Math.min(dist / 2000.0, 1.0)) * 0.7;
 
-        // Calculate angles based on row/col position in grid
-        // Column 0 = leftmost = -60°, Column 159 = rightmost = +60°
-        // Row 0 = topmost = +30°, Row 59 = bottommost = -30°
-        const colAngleRad = ((col / (gridWidth - 1)) - 0.5) * H_FOV * (Math.PI / 180);
-        const rowAngleRad = (0.5 - (row / (gridHeight - 1))) * V_FOV * (Math.PI / 180);
-
-        // Convert depth to meters
-        const MM2M = 0.001;
-        const depthM = dist * MM2M;
-
-        // PINHOLE CAMERA MODEL (Planar Projection)
-        // Z = depth along camera axis (constant for same depth)
-        // X = horizontal offset calculated from column angle
-        // Y = vertical offset calculated from row angle
-        const z = -depthM;                        // Depth along Z-axis
-        const x = -z * Math.tan(colAngleRad);     // MIRRORED: Invert X for correct left/right orientation
-        const y = z * Math.tan(rowAngleRad);     // Use row angle for Y
-
-        // Color mapping based on depth
-        const normalized = Math.min(dist / 2000.0, 1.0);
-        const hue = (1.0 - normalized) * 0.7; // Red (close) to Blue (far)
-
-        points[idx*4] = x;
-        points[idx*4+1] = -y;
-        points[idx*4+2] = -z;
-        points[idx*4+3] = hue;
+        points[idx * 4    ] = x;
+        points[idx * 4 + 1] = y;
+        points[idx * 4 + 2] = z;
+        points[idx * 4 + 3] = hue;
     }
 
     private parse2D(pkt: Uint8Array, payloadLen: number) {
@@ -600,7 +591,7 @@ export class Parser {
          // console.log("[Parser] 2D BitShift - Points:", points.length);
     }
     
-    private parse2DHexString(pkt: Uint8Array, payloadLen: number) {
+    private parse2DHexString(pkt: Uint8Array, _payloadLen: number) {
          // 16-bit parsing per user manual spec
          // Data Type: 16 bit (2 bytes per distance)
          // Error codes: 16000-16004
@@ -659,6 +650,11 @@ export class Parser {
      * Input: full packet as hexstring
      */
     private parseInfoHex(packetStr: string) {
+        console.log(
+            `%c[RX 🠔 Device] Response (INFO Hex, ${packetStr.length / 2} bytes): %c${packetStr.toUpperCase()}`,
+            'color: #10B981; font-weight: bold;',
+            'color: #34D399; font-family: monospace; font-weight: bold;'
+        );
         // Remove header (first 12 chars)
         const dataStr = packetStr.slice(12);
         
@@ -788,95 +784,16 @@ export class Parser {
             if (dist1 >= MIN_RANGE && dist1 <= MAX_RANGE && dist1 < ERROR_CODE_MIN) validCount++;
         }
         
-        // DEBUG: Compare both parsing methods
-        console.log('\n🔍 [PARSING DEBUG] Comparing methods:');
-        console.log('Raw hex (first 30 chars):', dataStr.substring(0, 30));
-        
-        // Method 1: Bit-packed (current)
-        const test1 = [];
-        for (let i = 0; i < 10; i += 2) {
-            const hs = (i / 2) * 6;
-            const b0 = parseInt(dataStr.substring(hs, hs + 2), 16);
-            const b1 = parseInt(dataStr.substring(hs + 2, hs + 4), 16);
-            const b2 = parseInt(dataStr.substring(hs + 4, hs + 6), 16);
-            const d0 = (b0 << 4) | ((b1 & 0xF0) >> 4);
-            const d1 = ((b1 & 0x0F) << 8) | b2;
-            test1.push(`${d0}`, `${d1}`);
-        }
-        console.log('Method 1 (bit-packed):', test1.join(', '));
-        
-        // Method 2: 3-char per pixel
-        const test2 = [];
-        for (let i = 0; i < 10; i++) {
-            const hex3 = dataStr.substring(i * 3, i * 3 + 3);
-            const d = parseInt(hex3, 16);
-            test2.push(`${d}`);
-        }
-        console.log('Method 2 (3-char):', test2.join(', '));
-        console.log('');
-        
-        // ═══════════════════════════════════════════════════════
-        // DEPTH GRID LOGGING
-        // ═══════════════════════════════════════════════════════
-        console.log('╔═══════════════════════════════════════════════════════╗');
-        console.log('║         DEPTH CAMERA GRID (160×60)                    ║');
-        console.log('╚═══════════════════════════════════════════════════════╝');
-        
-        // Log first row (R0C0 through R0C9)
-        console.log('\n[Depth Grid] First Row (R0C0 - R0C9):');
-        const row0Samples = [];
-        for (let col = 0; col < 10; col++) {
-            const idx = col; // First row
-            row0Samples.push(`R0C${col}=${distances[idx]}mm`);
-        }
-        console.log(row0Samples.join(', '));
-        
-        // Log sample from middle row (R30C0 - R30C9)
-        console.log('\n[Depth Grid] Middle Row (R30C0 - R30C9):');
-        const row30Samples = [];
-        for (let col = 0; col < 10; col++) {
-            const idx = 30 * GRID_WIDTH + col;
-            row30Samples.push(`R30C${col}=${distances[idx]}mm`);
-        }
-        console.log(row30Samples.join(', '));
-        
-        // Log raw hex samples for debugging
-        console.log('\n[Raw Hex] First 30 chars (10 pixels):');
-        console.log(dataStr.substring(0, 30));
-        console.log('Parsed as:', dataStr.match(/.{3}/g)?.slice(0, 10).map(h => `${h}=${parseInt(h,16)}mm`).join(', '));
-        
-        // Log statistics
-        let minDist = Infinity, maxDist = 0, sumDist = 0;
-        for (let i = 0; i < totalPixels; i++) {
-            if (distances[i] > 0 && distances[i] < 4080) {
-                minDist = Math.min(minDist, distances[i]);
-                maxDist = Math.max(maxDist, distances[i]);
-                sumDist += distances[i];
-            }
-        }
-        const avgDist = validCount > 0 ? sumDist / validCount : 0;
-        
-        console.log('\n[3D Stats]');
-        console.log(`  Total pixels: ${totalPixels}`);
-        console.log(`  Valid points: ${validCount} (${(validCount/totalPixels*100).toFixed(1)}%)`);
-        console.log(`  Depth range: ${minDist}mm - ${maxDist}mm`);
-        console.log(`  Average depth: ${avgDist.toFixed(1)}mm`);
-        
-        // Log sample 3D coordinates
-        console.log('\n[3D Coordinates] Sample points:');
-        for (let i = 0; i < 5; i++) {
-            const row = Math.floor(i / GRID_WIDTH);
-            const col = i % GRID_WIDTH;
-            const idx = i * 4;
-            console.log(`  R${row}C${col}: depth=${distances[i]}mm → (x=${points[idx].toFixed(3)}, y=${points[idx+1].toFixed(3)}, z=${points[idx+2].toFixed(3)})`);
-        }
-        
-        console.log('═══════════════════════════════════════════════════════\n');
-        
         this.on3D(points, distances);
     }
 
     private parseInfo(pkt: Uint8Array) {
+        const hex = Array.from(pkt).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+        console.log(
+            `%c[RX 🠔 Device] Response (INFO, ${pkt.length} bytes): %c${hex}`,
+            'color: #10B981; font-weight: bold;',
+            'color: #34D399; font-family: monospace; font-weight: bold;'
+        );
         // Response format: 5A 77 FF 07 00 10 F/W1 F/W2 F/W3 H/W1 H/W2 H/W3 CS
         // Bytes 6-8: Firmware version
         // Bytes 9-11: Hardware version

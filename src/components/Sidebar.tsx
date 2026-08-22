@@ -31,7 +31,7 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ 
-    isConnected, onConnect, onDisconnect, onCommand, onExportCSV, onToggleMesh, onTestFlatGrid, onShowMatrix, onChangeBaudRate, meshMode, frames, points, rawDistances, deviceInfo, 
+    isConnected, onConnect, onDisconnect, onCommand, onExportCSV, onToggleMesh, onTestFlatGrid, onShowMatrix, onChangeBaudRate, meshMode, frames, points, rawDistances: _rawDistances, deviceInfo, 
     filterMode, setFilterMode, parserMode, setParserMode,
     slamActive, onStartMapping, onStopMapping, onResetMap, slamPostprocessing, onSlamPostprocessingChange
 }) => {
@@ -62,28 +62,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
 
     const handleStart = async () => {
+        // Stop any active stream first to ensure clean state
+        await onCommand(CMD.stop);
+        await new Promise(r => setTimeout(r, 100));
+
         // For 3D mode, send setup commands first
         if (scanMode === '3D') {
-            // console.log('[Sidebar] Setting up 3D mode with LONG PULSE (10ms)...');
-            
-            // Send setup sequence with delays
             await onCommand(CMD.pulse3D_10ms);       // 1. Set pulse to 10ms (maximum) for stronger signal
-            await new Promise(r => setTimeout(r, 150));
+            await new Promise(r => setTimeout(r, 100));
             
             await onCommand(CMD.frequencyCh0);       // 2. Set frequency channel 0
-            await new Promise(r => setTimeout(r, 150));
+            await new Promise(r => setTimeout(r, 100));
             
             await onCommand(CMD.sensitivity);        // 3. Set sensitivity to 20
-            await new Promise(r => setTimeout(r, 150));
+            await new Promise(r => setTimeout(r, 100));
             
-            // console.log('[Sidebar] 3D setup complete (10ms pulse), starting scan...');
             await onCommand(CMD.scan3D);             // 4. Start 3D scan
         }
         else if (scanMode === '2D') {
-            onCommand(CMD.scan2D);
+            await onCommand(CMD.scan2D);
         }
         else {
-            onCommand(CMD.scanDual);
+            await onCommand(CMD.scanDual);
         }
     };
 

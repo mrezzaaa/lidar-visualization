@@ -6,9 +6,8 @@ import { DepthMapPreview } from './components/DepthMapPreview';
 import { SerialHandler } from './logic/SerialHandler';
 import { Parser, Point2D, DeviceInfo, ParserMode } from './logic/Parser';
 import { SLAM } from './logic/SLAM';
-import { CMD } from './logic/utils';
 import { getBaudCommand } from './logic/BaudRateUtils';
-import { applySOR, applyROR, applyMLS, applyDBSCAN, applyPointCleanNet, applyVoxelGrid } from './logic/Filters';
+import { applySOR, applyROR, applyMLS, applyDBSCAN, applyPointCleanNet } from './logic/Filters';
 
 type SlamPostprocessing = 'None' | 'VoxelGrid' | 'SOR';
 
@@ -28,6 +27,7 @@ function App() {
   const [slamUpdateTrigger, setSlamUpdateTrigger] = useState(0); // Force re-render when SLAM updates
   const [slamPostprocessing, setSlamPostprocessing] = useState<SlamPostprocessing>('None');
   const [showMatrixModal, setShowMatrixModal] = useState(false);
+  const [update3DTrigger, setUpdate3DTrigger] = useState(0);
 
   const serialRef = useRef<SerialHandler>(new SerialHandler());
   const parserRef = useRef<Parser | null>(null);
@@ -102,8 +102,11 @@ function App() {
             }
 
             if (latest3D.current) {
-                setPoints3D(latest3D.current);
-                setRawDistances(latestDist.current);
+                setPoints3D(new Float32Array(latest3D.current));
+                if (latestDist.current) {
+                    setRawDistances(new Uint16Array(latestDist.current));
+                }
+                setUpdate3DTrigger(prev => prev + 1);
             }
             dirtyRef.current = false;
         }
@@ -290,7 +293,7 @@ function App() {
             meshMode={meshMode}
             slamPoints={slamActive && slamRef.current ? [...slamRef.current.getPoints()] : []} // Create copy for now to ensure render
             slamUpdateTrigger={slamUpdateTrigger}
-            update3DTrigger={frames} // Use frames as trigger - it changes every time new data arrives!
+            update3DTrigger={update3DTrigger}
         />
         
         {/* Connection Status Overlay */}

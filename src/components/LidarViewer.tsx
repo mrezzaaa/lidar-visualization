@@ -16,7 +16,7 @@ interface LidarViewerProps {
 export class LidarViewer extends React.Component<LidarViewerProps, {
     hoveredPoint: { distance: number; x: number; y: number; z: number; angle: number } | null;
     }> {
-    private mountRef: React.RefObject<HTMLDivElement>;
+    private mountRef: React.RefObject<HTMLDivElement | null>;
     private scene: THREE.Scene | null = null;
     private camera: THREE.OrthographicCamera | null = null;
     private renderer: THREE.WebGLRenderer | null = null;
@@ -263,7 +263,7 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
             };
             
             // Add to mount container
-            this.mountRef.current.appendChild(div);
+            this.mountRef.current?.appendChild(div);
             
             // Update position every frame (simple approach)
             const origAnimate = this.animate;
@@ -429,6 +429,9 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
         if (this.cloud2D) {
             this.cloud2D.visible = true;
         }
+        if (this.points3D) {
+            this.points3D.visible = false;
+        }
     }
     
     private update3DPoints() {
@@ -440,20 +443,36 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
         const data = this.props.points3D;
         let validCount = 0;
         
+        if (this.cloud2D) {
+            this.cloud2D.visible = false;
+        }
+        
         for (let i = 0; i < data.length / 4; i++) {
             const x = data[i*4];
             const y = data[i*4+1];
             const z = data[i*4+2];
-            const c = data[i*4+3];
+            const hue = data[i*4+3];
             
             if (x !== 0 || y !== 0 || z !== 0) {
                 positions[validCount*3] = x;
                 positions[validCount*3+1] = y;
                 positions[validCount*3+2] = z;
                 
-                colors[validCount*3] = c;
-                colors[validCount*3+1] = c;
-                colors[validCount*3+2] = c;
+                // Convert hue (0.0=Red to 0.7=Blue) to RGB (HSL: sat 1.0, light 0.5)
+                const h = (hue || 0) * 6;
+                const c = 1.0;
+                const xVal = c * (1 - Math.abs((h % 2) - 1));
+                let r = 0, g = 0, b = 0;
+                if (h < 1) { r = c; g = xVal; b = 0; }
+                else if (h < 2) { r = xVal; g = c; b = 0; }
+                else if (h < 3) { r = 0; g = c; b = xVal; }
+                else if (h < 4) { r = 0; g = xVal; b = c; }
+                else if (h < 5) { r = xVal; g = 0; b = c; }
+                else { r = c; g = 0; b = xVal; }
+
+                colors[validCount*3] = r;
+                colors[validCount*3+1] = g;
+                colors[validCount*3+2] = b;
                 
                 validCount++;
             }
@@ -464,10 +483,8 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
         this.geometry3D.setDrawRange(0, validCount);
         this.geometry3D.computeBoundingSphere();
         
-        // console.log(`[LidarViewer] 3D points updated: ${validCount} valid points rendered`);
-        // Ensure points are visible when we have data
-        if (this.points3D && validCount > 0) {
-            this.points3D.visible = true;
+        if (this.points3D) {
+            this.points3D.visible = validCount > 0;
         }
     }
     
