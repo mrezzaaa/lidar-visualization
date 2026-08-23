@@ -30,6 +30,10 @@ interface SidebarProps {
     setSentinelFilterEnabled: (enabled: boolean) => void;
     yAxisDirection: YAxisDirection;
     setYAxisDirection: (dir: YAxisDirection) => void;
+    mirrorX: boolean;
+    setMirrorX: (mirror: boolean) => void;
+    showLowAmpShadows: boolean;
+    setShowLowAmpShadows: (show: boolean) => void;
     projectionModel: ProjectionModel;
     setProjectionModel: (model: ProjectionModel) => void;
     colorScheme: 'white' | 'hue' | 'height';
@@ -46,6 +50,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     isConnected, onConnect, onDisconnect, onCommand, onExportCSV, onToggleMesh, onTestFlatGrid, onShowMatrix, onChangeBaudRate, meshMode, frames, points, rawDistances: _rawDistances, deviceInfo, 
     filterMode, setFilterMode, parserMode, setParserMode,
     matrixScanOrder, setMatrixScanOrder, sentinelFilterEnabled, setSentinelFilterEnabled, yAxisDirection, setYAxisDirection,
+    mirrorX, setMirrorX, showLowAmpShadows, setShowLowAmpShadows,
     projectionModel, setProjectionModel, colorScheme, setColorScheme,
     slamActive, onStartMapping, onStopMapping, onResetMap, slamPostprocessing, onSlamPostprocessingChange
 }) => {
@@ -287,6 +292,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         -Y Up
                                     </button>
                                 </div>
+                            </div>
+
+                            <div className="flex items-center justify-between pt-1 border-t border-indigo-900/50">
+                                <span className="text-[11px] text-gray-300">Mirror Horizontal (Kiri ↔ Kanan)</span>
+                                <input
+                                    type="checkbox"
+                                    checked={mirrorX}
+                                    onChange={(e) => setMirrorX(e.target.checked)}
+                                    className="rounded bg-gray-900 border-gray-700 text-indigo-500 focus:ring-indigo-500 h-4 w-4 cursor-pointer"
+                                />
+                            </div>
+
+                            <div className="flex items-center justify-between pt-1 border-t border-indigo-900/50">
+                                <span className="text-[11px] text-gray-300">Display 4081 Shadow Rays (Far Depth)</span>
+                                <input
+                                    type="checkbox"
+                                    checked={showLowAmpShadows}
+                                    onChange={(e) => setShowLowAmpShadows(e.target.checked)}
+                                    className="rounded bg-gray-900 border-gray-700 text-indigo-500 focus:ring-indigo-500 h-4 w-4 cursor-pointer"
+                                />
                             </div>
 
                             <div className="flex items-center justify-between pt-1 border-t border-indigo-900/50">

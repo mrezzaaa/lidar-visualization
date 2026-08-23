@@ -28,6 +28,8 @@ function App() {
   const [matrixScanOrder, setMatrixScanOrder] = useState<MatrixScanOrder>('row-major');
   const [sentinelFilterEnabled, setSentinelFilterEnabled] = useState(false);
   const [yAxisDirection, setYAxisDirection] = useState<YAxisDirection>('up');
+  const [mirrorX, setMirrorX] = useState(false);
+  const [showLowAmpShadows, setShowLowAmpShadows] = useState(true);
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
   const [parserMode, setParserMode] = useState<ParserMode>('bitshift');
   const [slamActive, setSlamActive] = useState(false);
@@ -166,14 +168,16 @@ function App() {
     serialRef.current.setHexMode(parserMode === 'hexstring');
   }, [parserMode]);
 
-  // Update Matrix scanning order, sentinel filter, and axis direction
+  // Update Matrix scanning order, sentinel filter, axis direction, mirrorX, and shadow rays
   useEffect(() => {
     if (parserRef.current) {
       parserRef.current.setMatrixScanOrder(matrixScanOrder);
       parserRef.current.setSentinelFilter(sentinelFilterEnabled);
       parserRef.current.setYAxisDirection(yAxisDirection);
+      parserRef.current.setMirrorX(mirrorX);
+      parserRef.current.setLowAmpShadows(showLowAmpShadows);
     }
-  }, [matrixScanOrder, sentinelFilterEnabled, yAxisDirection]);
+  }, [matrixScanOrder, sentinelFilterEnabled, yAxisDirection, mirrorX, showLowAmpShadows]);
 
   const handleConnect = async (baudRate: number) => {
     try {
@@ -313,6 +317,10 @@ function App() {
         setSentinelFilterEnabled={setSentinelFilterEnabled}
         yAxisDirection={yAxisDirection}
         setYAxisDirection={setYAxisDirection}
+        mirrorX={mirrorX}
+        setMirrorX={setMirrorX}
+        showLowAmpShadows={showLowAmpShadows}
+        setShowLowAmpShadows={setShowLowAmpShadows}
         projectionModel={projectionModel}
         setProjectionModel={handleSetProjectionModel}
         colorScheme={colorScheme}

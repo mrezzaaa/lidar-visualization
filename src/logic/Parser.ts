@@ -52,10 +52,10 @@ export class Parser {
     public matrixScanOrder: MatrixScanOrder = 'row-major';
     public sentinelFilterEnabled: boolean = false;
     public yAxisDirection: YAxisDirection = 'up';
+    public mirrorX: boolean = false;
 
     private reusablePoints: Float32Array;      // 160*60*4 = 38,400 floats
     private reusableDistances: Uint16Array;    // 160*60 = 9,600 ints
-    private last3DWarn: number = 0;            // Throttle checksum warning
 
     private hexBuffer: string = '';  
     public frames: number;
@@ -100,6 +100,14 @@ export class Parser {
         this.yAxisDirection = dir;
     }
 
+    setMirrorX(mirror: boolean) {
+        this.mirrorX = mirror;
+    }
+
+    setLowAmpShadows(enabled: boolean) {
+        this.showLowAmpShadows = enabled;
+    }
+
     /**
      * TEST METHOD: Generate flat depth grid (160x60) with all depths at 1500mm
      * This tests the depth camera projection without real sensor data
@@ -133,9 +141,7 @@ export class Parser {
             this.hexBuffer += data;
             this.processHexBuffer();
         } else {
-            // BITSHIFT MODE: Zero-Copy Fast Buffer Append (< 5 microseconds)
-            // NEVER do heavy parsing synchronously here to avoid blocking USB UART read loop!
-            
+            // BITSHIFT MODE: Accumulate byte buffer
             // 1. Compact buffer if needed (if readOffset is far ahead or buffer is full)
             if (this.readOffset > 1_000_000 || (this.bufferLength + data.length > this.buffer.length)) {
                 this.compactBuffer();
@@ -151,14 +157,19 @@ export class Parser {
 
             this.buffer.set(data, this.bufferLength);
             this.bufferLength += data.length;
-            // Zero blocking: pushData returns immediately in < 2 microseconds!
-            // processBuffer() is called by renderLoop (requestAnimationFrame) in App.tsx
+
+            // 3. Process available packets
+            this.processBuffer();
         }
     }
 
     private compactBuffer() {
         if (this.readOffset === 0) return;
+        
+        // Move valid data (readOffset -> bufferLength) to start (0)
+        // copyWithin is fast (memmove)
         this.buffer.copyWithin(0, this.readOffset, this.bufferLength);
+        
         this.bufferLength -= this.readOffset;
         this.readOffset = 0;
     }
@@ -267,44 +278,6 @@ export class Parser {
                 if (payloadAvailable >= FIXED_3D_LENGTH) {
                     const packet = this.buffer.subarray(this.readOffset, this.readOffset + FIXED_3D_LENGTH);
 
-                    const csOk = this.validateChecksum(packet);
-                    if (!csOk) {
-                        const len = packet.length;
-                        const receivedCS = packet[len - 1];
-                        let calcCS = 0;
-                        for (let i = 3; i < len - 1; i++) calcCS ^= packet[i];
-
-                        // Diagnostic: Check where the NEXT 0x5A 0x77 0xFF header is in the buffer
-                        let nextHeaderOffset = -1;
-                        for (let j = this.readOffset + 6; j < this.bufferLength - 3; j++) {
-                            if (this.buffer[j] === 0x5A && this.buffer[j+1] === 0x77 && this.buffer[j+2] === 0xFF) {
-                                nextHeaderOffset = j - this.readOffset;
-                                break;
-                            }
-                        }
-
-                        const tw = performance.now();
-                        if (tw - this.last3DWarn > 1000) {
-                            this.last3DWarn = tw;
-                            console.warn(
-                                `[Parser] 3D Checksum Mismatch!\n` +
-                                `  calcXOR=0x${calcCS.toString(16).padStart(2,'0')} != receivedCS=0x${receivedCS.toString(16).padStart(2,'0')}\n` +
-                                `  Hdr: ${Array.from(packet.subarray(0, 6)).map(b => b.toString(16).padStart(2,'0')).join(' ')}\n` +
-                                `  Tail (last 4 bytes): ${Array.from(packet.subarray(len - 4)).map(b => b.toString(16).padStart(2,'0')).join(' ')}\n` +
-                                `  Next 5A 77 FF found at offset: +${nextHeaderOffset} bytes (expected +14407)`
-                            );
-                        }
-
-                        // Resync: If the next header was found, jump directly to it!
-                        // Otherwise advance past current 3-byte header to search forward.
-                        if (nextHeaderOffset > 0) {
-                            this.readOffset += nextHeaderOffset;
-                        } else {
-                            this.readOffset += 3;
-                        }
-                        continue;
-                    }
-
                     this.frames++;
                     this.parse3D(packet);
                     this.readOffset += FIXED_3D_LENGTH;
@@ -316,14 +289,19 @@ export class Parser {
         }
     }
 
+    private matchHeader(offset: number, pattern: number[]): boolean {
+        for(let i=0; i<pattern.length; i++) {
+            if (this.buffer[offset+i] !== pattern[i]) return false;
+        }
+        return true;
+    }
+
     private validateChecksum(packet: Uint8Array): boolean {
         const len = packet.length;
         if (len < 5) return false;
-
+        
         const receivedCS = packet[len - 1];
         let calcCS = 0;
-        // Checksum from index 3 up to len-2
-        // Per KNOWLEDGE.md §6: XOR buffer[3]..buffer[len-2] (header 5A 77 FF excluded)
         for (let i = 3; i < len - 1; i++) {
             calcCS ^= packet[i];
         }
@@ -447,13 +425,6 @@ export class Parser {
 
         // Advance buffer to next header
         this.hexBuffer = this.hexBuffer.slice(next.idx);
-    }
-
-    private matchHeader(offset: number, pattern: number[]): boolean {
-        for(let i=0; i<pattern.length; i++) {
-            if (this.buffer[offset+i] !== pattern[i]) return false;
-        }
-        return true;
     }
 
     private parse3D(pkt: Uint8Array) {
@@ -657,6 +628,8 @@ export class Parser {
         return col + row * W;
     }
 
+    public showLowAmpShadows: boolean = true;
+
     /**
      * Compute 3D point using the CygLiDAR D1 fisheye lens distortion tables.
      *
@@ -680,17 +653,26 @@ export class Parser {
         const MAX_RANGE      = 4079;
         const ERROR_CODE_MIN = 4080;
 
-        let isInvalid = dist === 0 || dist < MIN_RANGE || dist >= MAX_RANGE || dist >= ERROR_CODE_MIN;
-        if (this.sentinelFilterEnabled && (dist & 0xFF) === 0xFF) {
-            isInvalid = true;
-        }
+        let renderDist = dist;
+        let isShadowRay = false;
 
-        if (isInvalid) {
-            points[idx * 4    ] = 0;
-            points[idx * 4 + 1] = 0;
-            points[idx * 4 + 2] = 0;
-            points[idx * 4 + 3] = 0;
-            return;
+        // 4081 = LOW_AMPLITUDE (No reflection / out of range / shadow)
+        if (dist === 4081 && this.showLowAmpShadows) {
+            renderDist = 3000; // Project to far depth boundary (3.0 meters)
+            isShadowRay = true;
+        } else {
+            let isInvalid = dist === 0 || dist < MIN_RANGE || dist >= MAX_RANGE || dist >= ERROR_CODE_MIN;
+            if (this.sentinelFilterEnabled && (dist & 0xFF) === 0xFF) {
+                isInvalid = true;
+            }
+
+            if (isInvalid) {
+                points[idx * 4    ] = 0;
+                points[idx * 4 + 1] = 0;
+                points[idx * 4 + 2] = 0;
+                points[idx * 4 + 3] = 0;
+                return;
+            }
         }
 
         // Coordinate projection:
@@ -698,13 +680,14 @@ export class Parser {
         // +Y = Up (-tabley when yAxisDirection is 'up', +tabley when 'down')
         // +Z = Forward (tablez)
         const ySign = this.yAxisDirection === 'up' ? -1 : 1;
+        const xSign = this.mirrorX ? -1 : 1;
 
-        const x =  dist * tablex[idx];
-        const y =  ySign * dist * tabley[idx];
-        const z =  dist * tablez[idx];
+        const x =  xSign * renderDist * tablex[idx];
+        const y =  ySign * renderDist * tabley[idx];
+        const z =  renderDist * tablez[idx];
 
-        // Hue: Red = close (50 mm), Blue = far (3000 mm)
-        const hue = (1.0 - Math.min(dist / 3000.0, 1.0)) * 0.7;
+        // Hue: If shadow ray, mark hue = -1.0, else distance gradient (Red=close, Blue=far)
+        const hue = isShadowRay ? -1.0 : (1.0 - Math.min(renderDist / 3000.0, 1.0)) * 0.7;
 
         points[idx * 4    ] = x;
         points[idx * 4 + 1] = y;
@@ -755,25 +738,27 @@ export class Parser {
     }
     
     private parse2DBitShift(pkt: Uint8Array, _payloadLen: number) {
-         const numPoints = 160;
-         const points: Point2D[] = [];
          const HEADER_SIZE = 6;
+         const dataBytes = pkt.length - 7; // Exclude 6 header bytes and 1 checksum byte
+         const numPoints = Math.floor(dataBytes / 2);
+         const points: Point2D[] = [];
          
-         for(let i=0; i<numPoints; i++) {
-             const off = HEADER_SIZE + (i*2);
-             if (off + 1 >= pkt.length) break;
+         for (let i = 0; i < numPoints; i++) {
+             const off = HEADER_SIZE + (i * 2);
+             if (off + 1 >= pkt.length - 1) break;
 
              // 2D distance is 16-bit LITTLE ENDIAN (LSB first): LSB | (MSB << 8)
-             const dist = pkt[off] | (pkt[off+1] << 8);
+             const dist = pkt[off] | (pkt[off + 1] << 8);
 
              const angleDeg = -60 + (i * 0.75);
-             const angleRad = angleDeg * (Math.PI/180);
+             const angleRad = angleDeg * (Math.PI / 180);
 
              // Filter valid 2D range: 200 to 8000 mm (< 16000 error codes)
              if (dist >= 200 && dist <= 8000) {
                  const dm = dist * 0.001;
-                 const x = -Math.sin(angleRad) * dm;
-                 const z = Math.cos(angleRad) * dm;
+                 const xSign = this.mirrorX ? 1 : -1;
+                 const x = xSign * Math.sin(angleRad) * dm;
+                 const z =  Math.cos(angleRad) * dm;
                  
                  points.push({ x, y: 0, z, color: 0x00ff00 }); 
              }
@@ -803,7 +788,8 @@ export class Parser {
              
              if (dist >= 200 && dist <= 8000) {
                  const dm = dist / 1000.0;
-                 const x = -Math.sin(angleRad) * dm;
+                 const xSign = this.mirrorX ? 1 : -1;
+                 const x = xSign * Math.sin(angleRad) * dm;
                  const z = Math.cos(angleRad) * dm;
                  points.push({ x, y: 0, z, color: 0x00ff00 });
              }
@@ -878,8 +864,9 @@ export class Parser {
 
             if (!isNaN(dist) && dist > 50 && dist < 16000) {
                 const dm = dist * 0.001;
+                const xSign = this.mirrorX ? -1 : 1;
                 points.push({ 
-                    x: Math.sin(angleRad) * dm, // MIRRORED: Invert X (remove negation)
+                    x: xSign * Math.sin(angleRad) * dm,
                     y: 0, 
                     z: Math.cos(angleRad) * dm, 
                     color: 0x00ff00 

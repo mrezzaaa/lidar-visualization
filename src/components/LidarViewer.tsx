@@ -457,33 +457,38 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
                 
                 let r = 0.95, g = 0.95, b = 0.95;
 
-                const colorScheme = this.props.colorScheme || 'white';
-                if (colorScheme === 'white') {
-                    // RViz Monochrome White style
-                    r = 0.95; g = 0.95; b = 0.95;
-                } else if (colorScheme === 'height') {
-                    // Height-based coloring (Y axis)
-                    const normY = Math.max(0, Math.min(1, (y + 0.5) / 1.0));
-                    const h = normY * 6;
-                    const c = 1.0;
-                    const xVal = c * (1 - Math.abs((h % 2) - 1));
-                    if (h < 1) { r = c; g = xVal; b = 0; }
-                    else if (h < 2) { r = xVal; g = c; b = 0; }
-                    else if (h < 3) { r = 0; g = c; b = xVal; }
-                    else if (h < 4) { r = 0; g = xVal; b = c; }
-                    else if (h < 5) { r = xVal; g = 0; b = c; }
-                    else { r = c; g = 0; b = xVal; }
+                if (hue < 0) {
+                    // 4081 Low Amplitude Shadow Ray: Render as dark silhouette background envelope
+                    r = 0.12; g = 0.16; b = 0.28;
                 } else {
-                    // Convert hue (0.0=Red to 0.7=Blue) to RGB (HSL: sat 1.0, light 0.5)
-                    const h = (hue || 0) * 6;
-                    const c = 1.0;
-                    const xVal = c * (1 - Math.abs((h % 2) - 1));
-                    if (h < 1) { r = c; g = xVal; b = 0; }
-                    else if (h < 2) { r = xVal; g = c; b = 0; }
-                    else if (h < 3) { r = 0; g = c; b = xVal; }
-                    else if (h < 4) { r = 0; g = xVal; b = c; }
-                    else if (h < 5) { r = xVal; g = 0; b = c; }
-                    else { r = c; g = 0; b = xVal; }
+                    const colorScheme = this.props.colorScheme || 'white';
+                    if (colorScheme === 'white') {
+                        // RViz Monochrome White style
+                        r = 0.95; g = 0.95; b = 0.95;
+                    } else if (colorScheme === 'height') {
+                        // Height-based coloring (Y axis)
+                        const normY = Math.max(0, Math.min(1, (y + 0.5) / 1.0));
+                        const h = normY * 6;
+                        const c = 1.0;
+                        const xVal = c * (1 - Math.abs((h % 2) - 1));
+                        if (h < 1) { r = c; g = xVal; b = 0; }
+                        else if (h < 2) { r = xVal; g = c; b = 0; }
+                        else if (h < 3) { r = 0; g = c; b = xVal; }
+                        else if (h < 4) { r = 0; g = xVal; b = c; }
+                        else if (h < 5) { r = xVal; g = 0; b = c; }
+                        else { r = c; g = 0; b = xVal; }
+                    } else {
+                        // Convert hue (0.0=Red to 0.7=Blue) to RGB (HSL: sat 1.0, light 0.5)
+                        const h = (hue || 0) * 6;
+                        const c = 1.0;
+                        const xVal = c * (1 - Math.abs((h % 2) - 1));
+                        if (h < 1) { r = c; g = xVal; b = 0; }
+                        else if (h < 2) { r = xVal; g = c; b = 0; }
+                        else if (h < 3) { r = 0; g = c; b = xVal; }
+                        else if (h < 4) { r = 0; g = xVal; b = c; }
+                        else if (h < 5) { r = xVal; g = 0; b = c; }
+                        else { r = c; g = 0; b = xVal; }
+                    }
                 }
 
                 colors[validCount*3] = r;

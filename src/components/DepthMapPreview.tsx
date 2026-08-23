@@ -87,9 +87,15 @@ export const DepthMapPreview: React.FC<DepthMapPreviewProps> = ({
                     const l = 0.5;
                     [r, g, b] = hslToRgb(h, s, l);
                 }
-            }
-            // Everything else (< 50, > 2000, error/sentinel) → black
-            else {
+            } else if (depth === 4081) {
+                // 4081 Low amplitude shadow ray: Render as dark silhouette background
+                if (colorMode === 'grayscale') {
+                    r = g = b = 25; // Dark slate
+                } else {
+                    r = 18; g = 28; b = 55; // Midnight blue silhouette
+                }
+            } else {
+                // Everything else (corrupt/sentinel) → black
                 r = g = b = 0;
             }
 
