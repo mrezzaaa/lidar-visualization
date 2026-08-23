@@ -1,7 +1,9 @@
 import React from 'react';
 import { Play, Square, Activity, Cpu } from 'lucide-react';
 import { CMD } from '../logic/utils';
-import { ParserMode } from '../logic/Parser';
+import { ParserMode, MatrixScanOrder, YAxisDirection } from '../logic/Parser';
+
+import { ProjectionModel } from '../logic/Constants3D';
 
 interface SidebarProps {
     isConnected: boolean;
@@ -22,6 +24,16 @@ interface SidebarProps {
     setFilterMode: (mode: any) => void;
     parserMode: ParserMode;
     setParserMode: (mode: ParserMode) => void;
+    matrixScanOrder: MatrixScanOrder;
+    setMatrixScanOrder: (order: MatrixScanOrder) => void;
+    sentinelFilterEnabled: boolean;
+    setSentinelFilterEnabled: (enabled: boolean) => void;
+    yAxisDirection: YAxisDirection;
+    setYAxisDirection: (dir: YAxisDirection) => void;
+    projectionModel: ProjectionModel;
+    setProjectionModel: (model: ProjectionModel) => void;
+    colorScheme: 'white' | 'hue' | 'height';
+    setColorScheme: (scheme: 'white' | 'hue' | 'height') => void;
     slamActive: boolean;
     onStartMapping: () => void;
     onStopMapping: () => void;
@@ -33,6 +45,8 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ 
     isConnected, onConnect, onDisconnect, onCommand, onExportCSV, onToggleMesh, onTestFlatGrid, onShowMatrix, onChangeBaudRate, meshMode, frames, points, rawDistances: _rawDistances, deviceInfo, 
     filterMode, setFilterMode, parserMode, setParserMode,
+    matrixScanOrder, setMatrixScanOrder, sentinelFilterEnabled, setSentinelFilterEnabled, yAxisDirection, setYAxisDirection,
+    projectionModel, setProjectionModel, colorScheme, setColorScheme,
     slamActive, onStartMapping, onStopMapping, onResetMap, slamPostprocessing, onSlamPostprocessingChange
 }) => {
     const [scanMode, setScanMode] = React.useState<'2D' | '3D' | 'Dual'>('2D');
@@ -205,6 +219,85 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     <option key={f.id} value={f.id}>{f.label}</option>
                                 ))}
                             </select>
+                        </div>
+
+                        {/* 3D Lens Projection Mode */}
+                        <div className="space-y-1">
+                            <label className="text-xs text-gray-500">Lens Projection</label>
+                            <select 
+                                value={projectionModel} 
+                                onChange={(e) => setProjectionModel(e.target.value as ProjectionModel)}
+                                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                                <option value="spherical">Spherical (ROS RViz Style)</option>
+                                <option value="fisheye">Fisheye LUT (SDK Official)</option>
+                            </select>
+                        </div>
+
+                        {/* 3D Color Scheme */}
+                        <div className="space-y-1">
+                            <label className="text-xs text-gray-500">Color Scheme</label>
+                            <select 
+                                value={colorScheme} 
+                                onChange={(e) => setColorScheme(e.target.value as any)}
+                                className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                                <option value="white">RViz White (Monochrome)</option>
+                                <option value="hue">Depth Rainbow (Hue)</option>
+                                <option value="height">Height Map (Y-Axis)</option>
+                            </select>
+                        </div>
+
+                        {/* 3D Matrix & Scanning Order Tuning */}
+                        <div className="space-y-2 p-2.5 bg-indigo-950/40 border border-indigo-500/40 rounded-lg">
+                            <div className="flex items-center justify-between">
+                                <label className="text-[11px] font-semibold text-indigo-300 uppercase tracking-wider">3D Matrix / Scan Order</label>
+                            </div>
+
+                            <div className="space-y-1">
+                                <label className="text-[10px] text-gray-400">Stream Stride Pattern</label>
+                                <select
+                                    value={matrixScanOrder}
+                                    onChange={(e) => setMatrixScanOrder(e.target.value as MatrixScanOrder)}
+                                    className="w-full bg-gray-900 border border-indigo-500/50 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+                                >
+                                    <option value="row-major">1. Row-Major (Left→Right, Top→Down)</option>
+                                    <option value="col-major">2. Column-Major (Top→Down Strips)</option>
+                                    <option value="col-major-flip-y">3. Column-Major (Bottom→Up Strips)</option>
+                                    <option value="full-reverse">4. Full Reverse (ROS points[::-1])</option>
+                                    <option value="flip-x">5. Horizontal Mirror (Flip X)</option>
+                                    <option value="flip-y">6. Vertical Mirror (Flip Y)</option>
+                                    <option value="zigzag-horizontal">7. Zigzag / Snake Scan</option>
+                                </select>
+                            </div>
+
+                            <div className="flex items-center justify-between pt-1">
+                                <span className="text-[11px] text-gray-300">Y-Axis Orientation</span>
+                                <div className="flex bg-gray-900 rounded p-0.5 border border-gray-700">
+                                    <button
+                                        onClick={() => setYAxisDirection('up')}
+                                        className={`text-[10px] px-2 py-0.5 rounded transition-colors ${yAxisDirection === 'up' ? 'bg-indigo-600 text-white font-medium' : 'text-gray-400 hover:text-gray-200'}`}
+                                    >
+                                        +Y Up
+                                    </button>
+                                    <button
+                                        onClick={() => setYAxisDirection('down')}
+                                        className={`text-[10px] px-2 py-0.5 rounded transition-colors ${yAxisDirection === 'down' ? 'bg-indigo-600 text-white font-medium' : 'text-gray-400 hover:text-gray-200'}`}
+                                    >
+                                        -Y Up
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center justify-between pt-1 border-t border-indigo-900/50">
+                                <span className="text-[11px] text-gray-300">Reject 0x..FF Sentinels</span>
+                                <input
+                                    type="checkbox"
+                                    checked={sentinelFilterEnabled}
+                                    onChange={(e) => setSentinelFilterEnabled(e.target.checked)}
+                                    className="rounded bg-gray-900 border-gray-700 text-indigo-500 focus:ring-indigo-500 h-4 w-4 cursor-pointer"
+                                />
+                            </div>
                         </div>
                     <div className="grid grid-cols-2 gap-2">
                         <button
@@ -399,9 +492,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <div className="space-y-2">
                     {/* Test Flat Grid Button */}
                     <button 
-                        className="w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded text-sm font-medium transition"
+                        className="w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded text-sm font-medium transition text-white shadow-lg"
                         onClick={onTestFlatGrid}
-                        disabled={!isConnected}
                         title="Generate test flat depth grid at 1500mm"
                     >
                         Test Flat Grid (1500mm)

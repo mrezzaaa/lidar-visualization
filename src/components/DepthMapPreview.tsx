@@ -4,6 +4,7 @@ interface DepthMapPreviewProps {
     depthData: Uint16Array | null;
     width?: number;
     height?: number;
+    sentinelFilterEnabled?: boolean;
 }
 
 type ColorMode = 'grayscale' | 'hue';
@@ -41,7 +42,8 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
 export const DepthMapPreview: React.FC<DepthMapPreviewProps> = ({ 
     depthData, 
     width = 320,  // 2x scale of 160
-    height = 120  // 2x scale of 60
+    height = 120, // 2x scale of 60
+    sentinelFilterEnabled = false
 }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [colorMode, setColorMode] = useState<ColorMode>('grayscale');
@@ -60,18 +62,18 @@ export const DepthMapPreview: React.FC<DepthMapPreviewProps> = ({
         const imageData = ctx.createImageData(GRID_WIDTH, GRID_HEIGHT);
         const data = imageData.data;
 
-        // Convert depth values to color
-        // ONLY map 50-2000mm range, everything else = black
         const MIN_DEPTH = 50;
-        const MAX_DEPTH = 2000;
+        const MAX_DEPTH = 4079; // Error codes start at 4080; all values below are real distances
 
         for (let i = 0; i < depthData.length; i++) {
             const depth = depthData[i];
             
             let r = 0, g = 0, b = 0;
             
-            // Valid range: 50-2000mm
-            if (depth >= MIN_DEPTH && depth <= MAX_DEPTH) {
+            // Valid range check
+            const isValid = depth >= MIN_DEPTH && depth < 4080 && (!sentinelFilterEnabled || (depth & 0xFF) !== 0xFF);
+
+            if (isValid) {
                 const normalized = (depth - MIN_DEPTH) / (MAX_DEPTH - MIN_DEPTH);
                 
                 if (colorMode === 'grayscale') {
@@ -80,14 +82,13 @@ export const DepthMapPreview: React.FC<DepthMapPreviewProps> = ({
                     r = g = b = gray;
                 } else {
                     // Hue: Red (0)=Close, Blue (0.66)=Far
-                    // We map 0..1 dist to 0..0.7 Hue (Red->Orange->Yellow->Green->Blue)
                     const h = (1 - normalized) * 0.7; // 0.7 = Blue-ish, 0 = Red
                     const s = 1.0;
                     const l = 0.5;
                     [r, g, b] = hslToRgb(h, s, l);
                 }
             }
-            // Everything else (< 50, > 2000, error codes) → black
+            // Everything else (< 50, > 2000, error/sentinel) → black
             else {
                 r = g = b = 0;
             }

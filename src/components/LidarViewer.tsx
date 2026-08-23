@@ -7,10 +7,11 @@ interface LidarViewerProps {
     points2D: Point2D[];
     points3D: Float32Array | null;
     rawDistances: Uint16Array | null;
-    meshMode: boolean; // Toggle between points and mesh (future)
-    update3DTrigger?: number; // Force 3D update even if points3D ref is same
-    slamPoints: Point2D[];  // Accumulated SLAM points
-    slamUpdateTrigger?: number; // Force SLAM update
+    meshMode: boolean;
+    colorScheme?: 'white' | 'hue' | 'height';
+    update3DTrigger?: number;
+    slamPoints: Point2D[];
+    slamUpdateTrigger?: number;
 }
 
 export class LidarViewer extends React.Component<LidarViewerProps, {
@@ -18,7 +19,7 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
     }> {
     private mountRef: React.RefObject<HTMLDivElement | null>;
     private scene: THREE.Scene | null = null;
-    private camera: THREE.OrthographicCamera | null = null;
+    private camera: THREE.PerspectiveCamera | null = null;
     private renderer: THREE.WebGLRenderer | null = null;
     private controls: OrbitControls | null = null;
     private cloud2D: THREE.Points | null = null;
@@ -124,31 +125,23 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x1a1a1a);
 
-        // Camera
+        // Camera - Perspective Camera (ROS RViz Style: Pitch 36°, Yaw 45°)
         const width = this.mountRef.current.clientWidth;
         const height = this.mountRef.current.clientHeight;
         const aspect = width / height;
-        const frustumSize = 10;
-        this.camera = new THREE.OrthographicCamera(
-            frustumSize * aspect / -2,
-            frustumSize * aspect / 2,
-            frustumSize / 2,
-            frustumSize / -2,
-            0.1,
-            100
-        );
-        this.camera.position.set(10, 10, 10);
-        this.camera.lookAt(0, 0, 0);
+        this.camera = new THREE.PerspectiveCamera(50, aspect, 0.05, 50);
+        // Position at RViz Orbit angle looking at the point cloud center (0, 0, 1.2)
+        this.camera.position.set(1.7, 1.8, -0.5);
+        this.camera.lookAt(0, 0, 1.2);
 
         // Renderer
         this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         this.renderer.setSize(width, height);
         this.mountRef.current.appendChild(this.renderer.domElement);
         
-        // console.log('[LidarViewer] Canvas created. Total canvases:', document.querySelectorAll('canvas').length);
-
         // Controls
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+        this.controls.target.set(0, 0, 1.2);
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.05;
         this.controls.enabled = true;
@@ -215,7 +208,11 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
         const col3D = new Float32Array(MAX_3D * 3);
         this.geometry3D.setAttribute('position', new THREE.BufferAttribute(pos3D, 3));
         this.geometry3D.setAttribute('color', new THREE.BufferAttribute(col3D, 3));
-        const mat3D = new THREE.PointsMaterial({ size: 2, vertexColors: true }); // Increased size for visibility
+        const mat3D = new THREE.PointsMaterial({ 
+            size: 4, 
+            vertexColors: true,
+            sizeAttenuation: false
+        });
         this.points3D = new THREE.Points(this.geometry3D, mat3D);
         this.points3D.visible = true; // Show 3D points when data exists
         this.scene.add(this.points3D);
@@ -458,17 +455,36 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
                 positions[validCount*3+1] = y;
                 positions[validCount*3+2] = z;
                 
-                // Convert hue (0.0=Red to 0.7=Blue) to RGB (HSL: sat 1.0, light 0.5)
-                const h = (hue || 0) * 6;
-                const c = 1.0;
-                const xVal = c * (1 - Math.abs((h % 2) - 1));
-                let r = 0, g = 0, b = 0;
-                if (h < 1) { r = c; g = xVal; b = 0; }
-                else if (h < 2) { r = xVal; g = c; b = 0; }
-                else if (h < 3) { r = 0; g = c; b = xVal; }
-                else if (h < 4) { r = 0; g = xVal; b = c; }
-                else if (h < 5) { r = xVal; g = 0; b = c; }
-                else { r = c; g = 0; b = xVal; }
+                let r = 0.95, g = 0.95, b = 0.95;
+
+                const colorScheme = this.props.colorScheme || 'white';
+                if (colorScheme === 'white') {
+                    // RViz Monochrome White style
+                    r = 0.95; g = 0.95; b = 0.95;
+                } else if (colorScheme === 'height') {
+                    // Height-based coloring (Y axis)
+                    const normY = Math.max(0, Math.min(1, (y + 0.5) / 1.0));
+                    const h = normY * 6;
+                    const c = 1.0;
+                    const xVal = c * (1 - Math.abs((h % 2) - 1));
+                    if (h < 1) { r = c; g = xVal; b = 0; }
+                    else if (h < 2) { r = xVal; g = c; b = 0; }
+                    else if (h < 3) { r = 0; g = c; b = xVal; }
+                    else if (h < 4) { r = 0; g = xVal; b = c; }
+                    else if (h < 5) { r = xVal; g = 0; b = c; }
+                    else { r = c; g = 0; b = xVal; }
+                } else {
+                    // Convert hue (0.0=Red to 0.7=Blue) to RGB (HSL: sat 1.0, light 0.5)
+                    const h = (hue || 0) * 6;
+                    const c = 1.0;
+                    const xVal = c * (1 - Math.abs((h % 2) - 1));
+                    if (h < 1) { r = c; g = xVal; b = 0; }
+                    else if (h < 2) { r = xVal; g = c; b = 0; }
+                    else if (h < 3) { r = 0; g = c; b = xVal; }
+                    else if (h < 4) { r = 0; g = xVal; b = c; }
+                    else if (h < 5) { r = xVal; g = 0; b = c; }
+                    else { r = c; g = 0; b = xVal; }
+                }
 
                 colors[validCount*3] = r;
                 colors[validCount*3+1] = g;
@@ -489,7 +505,6 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
     }
     
     private handleResetView = () => {
-        // console.log('[LidarViewer] Reset View clicked');
         if (!this.camera || !this.controls || !this.mountRef.current) {
             console.warn('[LidarViewer] Reset View: refs not available');
             return;
@@ -498,28 +513,18 @@ export class LidarViewer extends React.Component<LidarViewerProps, {
         const width = this.mountRef.current.clientWidth;
         const height = this.mountRef.current.clientHeight;
         const aspect = width / height;
-        const frustumSize = 10;
         
-        // console.log('[LidarViewer] Before reset - Position:', this.camera.position, 'Zoom:', this.camera.zoom);
-        
-        this.camera.left = frustumSize * aspect / -2;
-        this.camera.right = frustumSize * aspect / 2;
-        this.camera.top = frustumSize / 2;
-        this.camera.bottom = frustumSize / -2;
-        this.camera.position.set(1.5, 1.5, 1.5);
-        this.camera.lookAt(0, 0, 0);
-        this.camera.zoom = 1;
+        this.camera.aspect = aspect;
+        this.camera.position.set(1.7, 1.8, -0.5);
+        this.camera.lookAt(0, 0, 1.2);
         this.camera.updateProjectionMatrix();
         
-        this.controls.target.set(0, 0, 0);
+        this.controls.target.set(0, 0, 1.2);
         this.controls.update();
         
         if (this.renderer && this.scene) {
             this.renderer.render(this.scene, this.camera);
         }
-        
-        // console.log('[LidarViewer] After reset - Position:', this.camera.position, 'Zoom:', this.camera.zoom);
-        // console.log('[LidarViewer] Reset View complete');
     };
     
     render() {

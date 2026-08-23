@@ -1,0 +1,167 @@
+{
+  "eslint.config.js": {
+    "mtime": 1766559565.8411996,
+    "ast_hash": "49c8473bcfcec3aef596a5fb04a6df06",
+    "semantic_hash": "49c8473bcfcec3aef596a5fb04a6df06"
+  },
+  "package.json": {
+    "mtime": 1766559888.0110157,
+    "ast_hash": "fe829fd1fb03c0c3bf8e76a1a1ab1c9e",
+    "semantic_hash": "fe829fd1fb03c0c3bf8e76a1a1ab1c9e"
+  },
+  "postcss.config.js": {
+    "mtime": 1766559888.1346505,
+    "ast_hash": "6b5c4cb81230b2fed05f0216b775c0f5",
+    "semantic_hash": "6b5c4cb81230b2fed05f0216b775c0f5"
+  },
+  "src/App.tsx": {
+    "mtime": 1787439459.9981406,
+    "ast_hash": "89d3b5e9ba426fa8ef34ed76268b316c",
+    "semantic_hash": ""
+  },
+  "src/components/DepthMapPreview.tsx": {
+    "mtime": 1787443199.1316764,
+    "ast_hash": "282cee7cc52f83983f7ddc9f080848e8",
+    "semantic_hash": ""
+  },
+  "src/components/DepthMatrixModal.tsx": {
+    "mtime": 1767385360.8432245,
+    "ast_hash": "f61e60356f69204796c66715bc6c568d",
+    "semantic_hash": "f61e60356f69204796c66715bc6c568d"
+  },
+  "src/components/LidarViewer.tsx": {
+    "mtime": 1787444436.5926964,
+    "ast_hash": "be298304e6eb5d752b504803e458769a",
+    "semantic_hash": ""
+  },
+  "src/components/Sidebar.tsx": {
+    "mtime": 1787444524.9414186,
+    "ast_hash": "71254828e3cdb3bf6cb0a2c56a368c75",
+    "semantic_hash": ""
+  },
+  "src/logic/BaudRateUtils.ts": {
+    "mtime": 1767388795.1725733,
+    "ast_hash": "1547709224617aff719e38cca22a7867",
+    "semantic_hash": "1547709224617aff719e38cca22a7867"
+  },
+  "src/logic/Constants3D.ts": {
+    "mtime": 1787429760.7959833,
+    "ast_hash": "56c006ff5b603854fd0c075a703e3bba",
+    "semantic_hash": "56c006ff5b603854fd0c075a703e3bba"
+  },
+  "src/logic/Filters.ts": {
+    "mtime": 1766613155.3687968,
+    "ast_hash": "69b9e8dd0dac3913ae710e013e999280",
+    "semantic_hash": "69b9e8dd0dac3913ae710e013e999280"
+  },
+  "src/logic/Parser.ts": {
+    "mtime": 1787443186.919784,
+    "ast_hash": "9442f2f2cbe98dc21505cfeb2279e7f2",
+    "semantic_hash": ""
+  },
+  "src/logic/SLAM.ts": {
+    "mtime": 1767391896.1664503,
+    "ast_hash": "ef93e0905c35cc0bec894e5183265824",
+    "semantic_hash": "ef93e0905c35cc0bec894e5183265824"
+  },
+  "src/logic/SerialHandler.ts": {
+    "mtime": 1787429043.87185,
+    "ast_hash": "0ec0e023cb5e4691b6ed973312a13b19",
+    "semantic_hash": "0ec0e023cb5e4691b6ed973312a13b19"
+  },
+  "src/logic/utils.ts": {
+    "mtime": 1787430894.7579746,
+    "ast_hash": "8c068c126400717811dc5602a8854c8b",
+    "semantic_hash": "8c068c126400717811dc5602a8854c8b"
+  },
+  "src/main.tsx": {
+    "mtime": 1766607652.005677,
+    "ast_hash": "c5ee78875221dca9ed6b4e4b41e63cea",
+    "semantic_hash": "c5ee78875221dca9ed6b4e4b41e63cea"
+  },
+  "src/types/web-serial.d.ts": {
+    "mtime": 1766559719.9345312,
+    "ast_hash": "8c8ee7a56b2fe23c6ce2a0c8108d4ead",
+    "semantic_hash": "8c8ee7a56b2fe23c6ce2a0c8108d4ead"
+  },
+  "src/vite-env.d.ts": {
+    "mtime": 1766559697.4168067,
+    "ast_hash": "0352474ba2918efe13895edbc3780d94",
+    "semantic_hash": "0352474ba2918efe13895edbc3780d94"
+  },
+  "tailwind.config.js": {
+    "mtime": 1766559634.780942,
+    "ast_hash": "3346df3fd0a1ea3f84440703bf8fd2cb",
+    "semantic_hash": "3346df3fd0a1ea3f84440703bf8fd2cb"
+  },
+  "tsconfig.json": {
+    "mtime": 1766559693.376386,
+    "ast_hash": "468c4a26d22e95a911cbe5ff0ed9ca27",
+    "semantic_hash": "468c4a26d22e95a911cbe5ff0ed9ca27"
+  },
+  "tsconfig.node.json": {
+    "mtime": 1766559695.4028568,
+    "ast_hash": "767b2e9abe6452170cdc399ca052cfbc",
+    "semantic_hash": "767b2e9abe6452170cdc399ca052cfbc"
+  },
+  "vercel.json": {
+    "mtime": 1767397862.8842802,
+    "ast_hash": "61bd31a2b0ac08f10f13c932b32d6ca1",
+    "semantic_hash": "61bd31a2b0ac08f10f13c932b32d6ca1"
+  },
+  "vite.config.js": {
+    "mtime": 1766559565.8463662,
+    "ast_hash": "88439104b3c207f17d33ef3160e3b080",
+    "semantic_hash": "88439104b3c207f17d33ef3160e3b080"
+  },
+  "README.md": {
+    "mtime": 1766559565.8401008,
+    "ast_hash": "3f01850e9fce601d04d6dba39204c1d8",
+    "semantic_hash": "3f01850e9fce601d04d6dba39204c1d8"
+  },
+  "THREEJS_REACT_ISSUE.md": {
+    "mtime": 1766566548.7449777,
+    "ast_hash": "9a6a2d47977222816ae846e0a974b6e0",
+    "semantic_hash": "9a6a2d47977222816ae846e0a974b6e0"
+  },
+  "index.html": {
+    "mtime": 1766559822.2713087,
+    "ast_hash": "b28b6f93152019a9cb8a4ccb09f30732",
+    "semantic_hash": "b28b6f93152019a9cb8a4ccb09f30732"
+  },
+  "Cyglidar D1 User Manual.pdf": {
+    "mtime": 1766561616.5562055,
+    "ast_hash": "c9158f78c9f789d2c7110969d0d96988",
+    "semantic_hash": "c9158f78c9f789d2c7110969d0d96988"
+  },
+  "public/vite.svg": {
+    "mtime": 1766559565.8423462,
+    "ast_hash": "8e3a10e157f75ada21ab742c022d5430",
+    "semantic_hash": "8e3a10e157f75ada21ab742c022d5430"
+  },
+  "src/assets/react.svg": {
+    "mtime": 1766559565.8443186,
+    "ast_hash": "f0402b67b6ce880f65666bb49e841696",
+    "semantic_hash": "f0402b67b6ce880f65666bb49e841696"
+  },
+  "test_3d_unpack.js": {
+    "mtime": 1787442746.4190502,
+    "ast_hash": "702544c4918bda67f336aaa865b8305e",
+    "semantic_hash": ""
+  },
+  "test_parser_3d.js": {
+    "mtime": 1787442538.1447244,
+    "ast_hash": "9eba1fd64b49697d33f741849d7e1a4f",
+    "semantic_hash": ""
+  },
+  "AGENTS.md": {
+    "mtime": 1787438957.696559,
+    "ast_hash": "e3345d19ae042abea382b8bf0b211df3",
+    "semantic_hash": ""
+  },
+  "KNOWLEDGE.md": {
+    "mtime": 1787441480.7389853,
+    "ast_hash": "26867660a358cc0ae594cac5598e412a",
+    "semantic_hash": ""
+  }
+}

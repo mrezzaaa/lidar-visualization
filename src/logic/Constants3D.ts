@@ -42,6 +42,7 @@ export const angleCamera: number[] = [
     55.188644, 55.837922, 56.487200, 57.136478, 57.785756,
     58.435035, 59.084313, 59.733591, 60.382869, 61.032147,
     61.681425, 62.330703, 62.979982, 63.629260, 64.278538,
+    64.927816, // entry 101 — official CYG_Distortion.h LENS_ANGLE[100]
 ];
 
 /** Radial image-size look-up table: 100 entries (in sensor pixel units) */
@@ -66,6 +67,7 @@ export const realImageSize: number[] = [
     1.176892, 1.205008, 1.233960, 1.263789, 1.294543,
     1.326272, 1.359031, 1.392875, 1.427865, 1.464057,
     1.501507, 1.540263, 1.580362, 1.621823, 1.664646,
+    1.708800, // entry 101 — official CYG_Distortion.h REAL_IMAGE_HEIGHT[100]
 ];
 
 // ---------------------------------------------------------------------------
@@ -89,41 +91,41 @@ function interpolate(xin: number, x0: number, y0: number, x1: number, y1: number
  */
 function getAngle(col: number, row: number): number {
     const radius = PIXEL_REAL_SIZE * Math.sqrt(col * col + row * row);
-    let alfaGrad = 0;
-    for (let i = 1; i < realImageSize.length; i++) {
-        if (radius >= realImageSize[i - 1] && radius <= realImageSize[i]) {
-            alfaGrad = interpolate(
+    const n = realImageSize.length;
+
+    // Clamp below: pixel exactly at center
+    if (radius <= realImageSize[0]) return angleCamera[0];
+
+    // Interpolate within table
+    for (let i = 1; i < n; i++) {
+        if (radius <= realImageSize[i]) {
+            return interpolate(
                 radius,
                 realImageSize[i - 1], angleCamera[i - 1],
                 realImageSize[i],     angleCamera[i]
             );
-            break;
         }
     }
-    // If radius exceeds the last table entry, return the maximum angle
-    if (alfaGrad === 0 && radius > realImageSize[realImageSize.length - 1]) {
-        alfaGrad = angleCamera[angleCamera.length - 1];
-    }
-    return alfaGrad;
+
+    // Radius beyond table max — extrapolate from last two entries
+    // (matches official SDK behaviour: clamp to max angle)
+    return angleCamera[n - 1];
 }
 
+export type ProjectionModel = 'spherical' | 'fisheye';
+
+export let currentProjectionModel: ProjectionModel = 'fisheye';
+
+const tablex_fisheye = new Float32Array(160 * 60);
+const tabley_fisheye = new Float32Array(160 * 60);
+const tablez_fisheye = new Float32Array(160 * 60);
+
+const tablex_spherical = new Float32Array(160 * 60);
+const tabley_spherical = new Float32Array(160 * 60);
+const tablez_spherical = new Float32Array(160 * 60);
+
 /**
- * Populate tablex / tabley / tablez for all 9 600 pixels.
- *
- * Each table entry is a unit-direction-cosine component such that:
- *   x_world = dist_mm * tablex[idx]
- *   y_world = dist_mm * tabley[idx]
- *   z_world = dist_mm * tablez[idx]
- *
- * Formula (from distort3DLens in firstnode.py):
- *   c  = col_centered – 0.5
- *   r  = row_centered – 0.5
- *   rp = sqrt(c² + r²)                   (pixel distance from centre)
- *   angleRad = radians(getAngle(c, r))
- *   rua = sin(angleRad)
- *   tablex = (c * rua / rp) * 0.001      (convert mm → m)
- *   tabley = (r * rua / rp) * 0.001
- *   tablez = cos(angleRad) * 0.001
+ * Populate fisheye LUT tables (official CygLiDAR SDK model).
  */
 export function initDistortion3D(): void {
     const WIDTH  = 160;
@@ -147,19 +149,61 @@ export function initDistortion3D(): void {
             const idx = col + row * WIDTH;
 
             if (rp < 1e-9) {
-                // Pixel at optical centre → pure forward direction
-                tablex[idx] = 0;
-                tabley[idx] = 0;
-                tablez[idx] = 0.001;
+                tablex_fisheye[idx] = 0;
+                tabley_fisheye[idx] = 0;
+                tablez_fisheye[idx] = 0.001;
             } else {
-                // Scale factor: 0.001 converts mm → m
-                tablex[idx] = (c * rua / rp) * 0.001;
-                tabley[idx] = (r * rua / rp) * 0.001;
-                tablez[idx] = Math.cos(angleRad) * 0.001;
+                tablex_fisheye[idx] = (c * rua / rp) * 0.001;
+                tabley_fisheye[idx] = (r * rua / rp) * 0.001;
+                tablez_fisheye[idx] = Math.cos(angleRad) * 0.001;
             }
         }
+    }
+
+    // Populate Spherical Angular Raycast tables (ROS RViz Standard: 120° HFOV, 65° VFOV)
+    const H_FOV = 120.0;
+    const V_FOV = 65.0;
+    const deg2rad = Math.PI / 180.0;
+
+    for (let row = 0; row < HEIGHT; row++) {
+        for (let col = 0; col < WIDTH; col++) {
+            // Horizontal angle: spans -60° to +60° across 160 columns (0.75° per column)
+            const azimuth = (col - (WIDTH - 1) / 2.0) * (H_FOV / WIDTH) * deg2rad;
+            // Vertical angle: spans -32.5° to +32.5° across 60 rows (1.0833° per row)
+            const elevation = (row - (HEIGHT - 1) / 2.0) * (V_FOV / HEIGHT) * deg2rad;
+
+            const idx = col + row * WIDTH;
+
+            // In Three.js coordinate system:
+            // +X = right: dist * sin(azimuth) * cos(elevation)
+            // +Y = up (inverted from image row): -dist * sin(elevation) -> handled by tabley
+            // +Z = forward: dist * cos(azimuth) * cos(elevation)
+            tablex_spherical[idx] = Math.sin(azimuth) * Math.cos(elevation) * 0.001;
+            tabley_spherical[idx] = Math.sin(elevation) * 0.001;
+            tablez_spherical[idx] = Math.cos(azimuth) * Math.cos(elevation) * 0.001;
+        }
+    }
+
+    // Apply initial model
+    setProjectionModel(currentProjectionModel);
+}
+
+/**
+ * Switch active projection model between 'spherical' (ROS RViz style) and 'fisheye' (Official SDK LUT).
+ */
+export function setProjectionModel(model: ProjectionModel): void {
+    currentProjectionModel = model;
+    if (model === 'spherical') {
+        tablex.set(tablex_spherical);
+        tabley.set(tabley_spherical);
+        tablez.set(tablez_spherical);
+    } else {
+        tablex.set(tablex_fisheye);
+        tabley.set(tabley_fisheye);
+        tablez.set(tablez_fisheye);
     }
 }
 
 // Initialise once at module load
 initDistortion3D();
+

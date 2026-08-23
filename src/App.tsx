@@ -4,10 +4,12 @@ import { LidarViewer } from './components/LidarViewer';
 import { DepthMatrixModal } from './components/DepthMatrixModal';
 import { DepthMapPreview } from './components/DepthMapPreview';
 import { SerialHandler } from './logic/SerialHandler';
-import { Parser, Point2D, DeviceInfo, ParserMode } from './logic/Parser';
+import { Parser, Point2D, DeviceInfo, ParserMode, MatrixScanOrder, YAxisDirection } from './logic/Parser';
 import { SLAM } from './logic/SLAM';
 import { getBaudCommand } from './logic/BaudRateUtils';
 import { applySOR, applyROR, applyMLS, applyDBSCAN, applyPointCleanNet } from './logic/Filters';
+
+import { ProjectionModel, setProjectionModel } from './logic/Constants3D';
 
 type SlamPostprocessing = 'None' | 'VoxelGrid' | 'SOR';
 
@@ -21,6 +23,11 @@ function App() {
   const [rawDistances, setRawDistances] = useState<Uint16Array | null>(null);
   const [meshMode, setMeshMode] = useState(false);
   const [filterMode, setFilterMode] = useState<FilterType>('NONE');
+  const [projectionModel, setProjectionModelState] = useState<ProjectionModel>('fisheye');
+  const [colorScheme, setColorScheme] = useState<'white' | 'hue' | 'height'>('white');
+  const [matrixScanOrder, setMatrixScanOrder] = useState<MatrixScanOrder>('row-major');
+  const [sentinelFilterEnabled, setSentinelFilterEnabled] = useState(false);
+  const [yAxisDirection, setYAxisDirection] = useState<YAxisDirection>('up');
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
   const [parserMode, setParserMode] = useState<ParserMode>('bitshift');
   const [slamActive, setSlamActive] = useState(false);
@@ -37,6 +44,15 @@ function App() {
   const latest3D = useRef<Float32Array | null>(null);
   const latestDist = useRef<Uint16Array | null>(null);
   const dirtyRef = useRef(false);
+
+  const handleSetProjectionModel = (model: ProjectionModel) => {
+    setProjectionModelState(model);
+    setProjectionModel(model);
+    // If flat grid or live points exist, re-process with new table
+    if (latestDist.current && parserRef.current) {
+        parserRef.current.generateTestFlatGrid();
+    }
+  };
 
   useEffect(() => {
     // Initialize Parser calling Refs
@@ -66,6 +82,13 @@ function App() {
     // Render Loop (Decoupled from Serial)
     let animationFrameId: number;
     const renderLoop = () => {
+        // Drain and parse any pending serial packets
+        parserRef.current?.processBuffer();
+
+        // Apply the Noise Filter selection to the 3D depth grid too
+        // (Filters.ts only post-processes the 2D path, so 3D needs this hook).
+        parserRef.current?.setDepthFilter(filterMode !== 'NONE');
+
         if (dirtyRef.current) {
             // Apply Filters to 2D Data before setting state
             if (latest2D.current) {
@@ -138,11 +161,19 @@ function App() {
   useEffect(() => {
     if (parserRef.current) {
       parserRef.current.setParserMode(parserMode);
-      // console.log('[App] Parser mode changed to:', parserMode);
     }
     // Also update SerialHandler to convert data at read level
     serialRef.current.setHexMode(parserMode === 'hexstring');
   }, [parserMode]);
+
+  // Update Matrix scanning order, sentinel filter, and axis direction
+  useEffect(() => {
+    if (parserRef.current) {
+      parserRef.current.setMatrixScanOrder(matrixScanOrder);
+      parserRef.current.setSentinelFilter(sentinelFilterEnabled);
+      parserRef.current.setYAxisDirection(yAxisDirection);
+    }
+  }, [matrixScanOrder, sentinelFilterEnabled, yAxisDirection]);
 
   const handleConnect = async (baudRate: number) => {
     try {
@@ -276,6 +307,16 @@ function App() {
         setFilterMode={setFilterMode}
         parserMode={parserMode}
         setParserMode={setParserMode}
+        matrixScanOrder={matrixScanOrder}
+        setMatrixScanOrder={setMatrixScanOrder}
+        sentinelFilterEnabled={sentinelFilterEnabled}
+        setSentinelFilterEnabled={setSentinelFilterEnabled}
+        yAxisDirection={yAxisDirection}
+        setYAxisDirection={setYAxisDirection}
+        projectionModel={projectionModel}
+        setProjectionModel={handleSetProjectionModel}
+        colorScheme={colorScheme}
+        setColorScheme={setColorScheme}
         slamActive={slamActive}
         onStartMapping={handleStartMapping}
         onStopMapping={handleStopMapping}
@@ -291,6 +332,7 @@ function App() {
             points3D={points3D}
             rawDistances={rawDistances}
             meshMode={meshMode}
+            colorScheme={colorScheme}
             slamPoints={slamActive && slamRef.current ? [...slamRef.current.getPoints()] : []} // Create copy for now to ensure render
             slamUpdateTrigger={slamUpdateTrigger}
             update3DTrigger={update3DTrigger}
@@ -312,7 +354,7 @@ function App() {
         <div className="fixed bottom-4 right-4 z-50">
           <div className="bg-gray-900/90 backdrop-blur-sm border border-gray-700 rounded-lg p-2 shadow-2xl">
             <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1 px-1">Depth Map</h3>
-            <DepthMapPreview depthData={rawDistances} />
+            <DepthMapPreview depthData={rawDistances} sentinelFilterEnabled={sentinelFilterEnabled} />
           </div>
         </div>
       )}
